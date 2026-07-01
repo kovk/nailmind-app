@@ -19,16 +19,18 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalAnimationApi
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,13 +45,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -69,6 +76,7 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Storefront
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -76,11 +84,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -89,6 +100,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -111,6 +123,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -122,6 +135,7 @@ import androidx.core.app.NotificationManagerCompat
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import com.nailmind.app.R
 import com.nailmind.app.data.api.AuthResponse
 import com.nailmind.app.data.api.AuthUserDto
 import com.nailmind.app.data.api.BookingDto
@@ -150,7 +164,7 @@ private enum class MainTab(
 ) {
     Home("首页", Icons.Rounded.Home),
     Styles("款式", Icons.Rounded.GridView),
-    TryOn("DIY", Icons.Rounded.AutoAwesome),
+    TryOn("小美", Icons.Rounded.AutoAwesome),
     Booking("预约", Icons.Rounded.CalendarMonth),
     Profile("我的", Icons.Rounded.Person)
 }
@@ -208,8 +222,8 @@ private data class StyleBrowseOption(
 )
 
 private val nailShapeBrowseOptions = listOf(
-    StyleBrowseOption("小短梯", listOf("小短梯", "短梯", "短方", "方圆")),
-    StyleBrowseOption("短方圆", listOf("短方圆", "短椭圆", "椭圆", "裸", "优雅")),
+    StyleBrowseOption("短方", listOf("短方", "小短梯", "短梯", "方圆")),
+    StyleBrowseOption("短圆", listOf("短圆", "短方圆", "短椭圆", "椭圆", "裸", "优雅")),
     StyleBrowseOption("中方", listOf("中方", "方形", "经典", "红")),
     StyleBrowseOption("中椭圆", listOf("中椭圆", "椭圆", "玫瑰", "粉")),
     StyleBrowseOption("中短梯", listOf("中短梯", "梯形", "莫兰迪", "雾霾")),
@@ -629,6 +643,7 @@ fun NailMindApp() {
     val repository = remember { NailMindRepository() }
     val coroutineScope = rememberCoroutineScope()
     var currentTab by remember { mutableStateOf(MainTab.Home) }
+    var showXiaomeiAssistant by remember { mutableStateOf(false) }
     val stack = remember {
         mutableStateListOf<Screen>(
             if (sharedPreferences.getString(AppConfig.authTokenPreference, null).isNullOrBlank()) Screen.Login else Screen.Tab(MainTab.Home)
@@ -1035,6 +1050,7 @@ fun NailMindApp() {
         back()
     }
     val showHomeChrome = current is Screen.Tab && (current.tab == MainTab.Home || current.tab == MainTab.TryOn)
+    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner
     val styleDetailStyle = (current as? Screen.StyleDetail)?.let { screen ->
         styleItems.firstOrNull { it.id == screen.styleId } ?: styleItems.firstOrNull()
     }
@@ -1074,12 +1090,24 @@ fun NailMindApp() {
         is Screen.BookingSuccess -> "预约成功"
         Screen.Settings -> "设置"
     }
+    val isPrimaryTabTopBar = current is Screen.Tab && when (current.tab) {
+        MainTab.Styles, MainTab.Booking, MainTab.Profile -> true
+        else -> false
+    }
 
     Scaffold(
         topBar = {
-            if (isAuthenticated && !showHomeChrome) {
+            if (isAuthenticated && !hideAppChrome) {
                 CenterAlignedTopAppBar(
-                    title = { Text(topBarTitle, fontWeight = FontWeight.SemiBold) },
+                    title = {
+                        Text(
+                            topBarTitle,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 20.sp,
+                            letterSpacing = if (isPrimaryTabTopBar) 2.sp else 0.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
                     navigationIcon = {
                         if (stack.size > 1) {
                             IconButton(onClick = ::back) {
@@ -1106,10 +1134,9 @@ fun NailMindApp() {
             }
         },
         bottomBar = {
-            if (isAuthenticated && current is Screen.Tab && current.tab != MainTab.TryOn) {
+            if (isAuthenticated && current is Screen.Tab) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
-                    shape = MaterialTheme.shapes.large,
                     shadowElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1118,81 +1145,59 @@ fun NailMindApp() {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 92.dp)
-                            .padding(horizontal = 8.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .height(62.dp)
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                        verticalAlignment = Alignment.Bottom
                     ) {
                         MainTab.entries.forEach { tab ->
                             val selected = currentTab == tab
                             val isTryOn = tab == MainTab.TryOn
                             TextButton(
                                 onClick = {
-                                    currentTab = tab
-                                stack.clear()
-                                stack.add(Screen.Tab(tab))
-                            },
+                                    if (isTryOn) {
+                                        showXiaomeiAssistant = true
+                                    } else {
+                                        currentTab = tab
+                                        stack.clear()
+                                        stack.add(Screen.Tab(tab))
+                                    }
+                                },
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = if (isTryOn) 72.dp else 64.dp),
+                                .height(if (isTryOn) 62.dp else 56.dp),
                             contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp)
                         ) {
                             if (isTryOn) {
-                                Surface(
-                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                                    shape = MaterialTheme.shapes.large,
-                                        tonalElevation = 0.dp,
-                                        shadowElevation = 2.dp,
-                                        border = androidx.compose.foundation.BorderStroke(
-                                            1.dp,
-                                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
-                                        )
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Icon(
-                                                imageVector = tab.icon,
-                                                contentDescription = tab.title,
-                                                tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = tab.title,
-                                                color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    Surface(
-                                        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
-                                        shape = MaterialTheme.shapes.medium
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            Icon(
-                                                imageVector = tab.icon,
-                                                contentDescription = tab.title,
-                                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.52f)
-                                            )
-                                            Spacer(Modifier.height(4.dp))
-                                            Text(
-                                                text = tab.title,
-                                                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
-                                                fontSize = 12.sp
-                                            )
-                                        }
-                                    }
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    RabbitTabIcon(selected = selected, modifier = Modifier.size(52.dp))
+                                }
+                            } else {
+                                Column(
+                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        imageVector = tab.icon,
+                                        contentDescription = tab.title,
+                                        tint = if (selected) RoseAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.82f),
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        text = tab.title,
+                                        color = if (selected) RoseAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+                                    )
                                 }
                             }
                         }
                     }
                 }
+            }
             } else if (isAuthenticated && current is Screen.StyleDetail && styleDetailStyle != null) {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
@@ -1230,12 +1235,17 @@ fun NailMindApp() {
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
+        val contentPadding = if (hideAppChrome) {
+            PaddingValues(0.dp)
+        } else {
+            innerPadding
+        }
         AnimatedContent(
             targetState = current,
-            transitionSpec = { fadeIn() togetherWith fadeOut() },
+            transitionSpec = { EnterTransition.None togetherWith ExitTransition.None },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(contentPadding)
         ) { screen ->
             when (screen) {
                 Screen.Login -> AuthScreen(
@@ -1317,6 +1327,14 @@ fun NailMindApp() {
                             stack.add(Screen.Tab(MainTab.Styles))
                         },
                         onRanking = { go(Screen.Ranking) },
+                        onAiPick = {
+                            go(Screen.DiyDesigner)
+                        },
+                        onTrend = {
+                            currentTab = MainTab.Styles
+                            stack.clear()
+                            stack.add(Screen.Tab(MainTab.Styles))
+                        },
                         onStyleClick = { go(Screen.StyleDetail(it)) }
                     )
                     MainTab.Styles -> StylesScreen(
@@ -1611,12 +1629,169 @@ fun NailMindApp() {
                 )
             }
         }
+        if (showXiaomeiAssistant) {
+            XiaomeiAssistantSheet(
+                onDismiss = { showXiaomeiAssistant = false },
+                onOpenDiy = {
+                    showXiaomeiAssistant = false
+                    go(Screen.DiyDesigner)
+                }
+            )
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HomeScreen(
+private fun XiaomeiAssistantSheet(
+    onDismiss: () -> Unit,
+    onOpenDiy: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxHeight(),
+        sheetState = sheetState,
+        containerColor = Color.White,
+        shape = MaterialTheme.shapes.large,
+        dragHandle = null
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(start = 18.dp, top = 48.dp, end = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "关闭小美",
+                        modifier = Modifier.size(28.dp),
+                        tint = Color.Black
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Image(
+                        painter = painterResource(id = R.drawable.bottom_nav_diy_icon),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        contentScale = ContentScale.Fit
+                    )
+                    Text("小美", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+                IconButton(onClick = onDismiss) {
+                    Text("—", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Text(
+                text = "我是小美，选款搭配随时问我",
+                fontSize = 26.sp,
+                lineHeight = 34.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.Black
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                XiaomeiPromptChip("💅 按肤色推荐显白美甲")
+                XiaomeiPromptChip("✨ 适合上班通勤的简约款")
+                XiaomeiPromptChip("🌸 甜酷氛围感美甲推荐")
+                XiaomeiPromptChip("🎨 我想自己 DIY 一款", onClick = onOpenDiy)
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                XiaomeiActionChip("深度思考", Icons.Rounded.AutoAwesome)
+                XiaomeiActionChip("找优惠", Icons.Rounded.Storefront)
+                XiaomeiActionChip("一键选款", Icons.Rounded.Star)
+            }
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding(),
+                color = Color.White,
+                shape = MaterialTheme.shapes.extraLarge,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE7E1E4)),
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "发消息或按住说话",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 18.sp,
+                        color = Color(0xFF9B9699)
+                    )
+                    Surface(
+                        modifier = Modifier.size(36.dp),
+                        shape = MaterialTheme.shapes.extraLarge,
+                        border = androidx.compose.foundation.BorderStroke(2.dp, Color.Black),
+                        color = Color.White
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("•))", fontSize = 14.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun XiaomeiPromptChip(text: String, onClick: () -> Unit = {}) {
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        color = Color.White,
+        shape = MaterialTheme.shapes.extraLarge,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE9E4E7))
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            fontSize = 16.sp,
+            color = Color(0xFF242124)
+        )
+    }
+}
+
+@Composable
+private fun XiaomeiActionChip(text: String, icon: ImageVector) {
+    Surface(
+        color = Color.White,
+        shape = MaterialTheme.shapes.extraLarge,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE4DEE2))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+            Text(text, fontSize = 14.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LegacyHomeScreen(
     recommended: List<NailStyle>,
     hot: List<NailStyle>,
     refreshing: Boolean,
@@ -1673,6 +1848,322 @@ private fun HomeScreen(
                 repeat((3 - hot.take(3).size).coerceAtLeast(0)) {
                     Spacer(Modifier.weight(1f))
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RabbitTabIcon(selected: Boolean, modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(id = R.drawable.bottom_nav_diy_icon),
+        contentDescription = if (selected) "DIY" else "DIY",
+        modifier = modifier,
+        contentScale = ContentScale.Fit
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun HomeScreen(
+    recommended: List<NailStyle>,
+    hot: List<NailStyle>,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    onSearch: () -> Unit,
+    onSeeMore: () -> Unit,
+    onRanking: () -> Unit,
+    onAiPick: () -> Unit,
+    onTrend: () -> Unit,
+    onStyleClick: (String) -> Unit
+) {
+    val recommendationFeed = (recommended + hot).distinctBy { it.id }
+    var selectedHomeCategory by remember { mutableStateOf("推荐") }
+    val displayedRecommendationFeed = remember(recommendationFeed, selectedHomeCategory) {
+        filterHomeRecommendationFeed(recommendationFeed, selectedHomeCategory)
+    }
+
+    PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            HomeTopHero(onSearch = onSearch)
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+            item { ActivityBannerPlaceholder(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp)) }
+            item {
+                HomeFeatureNavigation(
+                    onRanking = onRanking,
+                    onAiPick = onAiPick,
+                    onTrend = onTrend,
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                )
+            }
+            stickyHeader {
+                HomeCategoryTabs(
+                    selectedCategory = selectedHomeCategory,
+                    onCategoryChange = { selectedHomeCategory = it },
+                    modifier = Modifier
+                )
+            }
+            if (displayedRecommendationFeed.isEmpty()) {
+                item {
+                    EmptyState(
+                        title = "暂无推荐款式",
+                        subtitle = "下拉刷新后会展示适合你的美甲款式"
+                    )
+                }
+            } else {
+                items(displayedRecommendationFeed.chunked(2)) { rowStyles ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        rowStyles.forEach { style ->
+                            WaterfallStyleCard(
+                                style = style,
+                                modifier = Modifier.weight(1f),
+                                onClick = { onStyleClick(style.id) }
+                            )
+                        }
+                        if (rowStyles.size == 1) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeTopHero(onSearch: () -> Unit) {
+    Column {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(3f)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.home_header_nail_mind),
+                contentDescription = "Nail Mind",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .height(40.dp)
+                    .offset(y = 0.dp)
+                    .clickable(onClick = onSearch),
+                color = Color(0xFFFFF8FB),
+                shape = MaterialTheme.shapes.extraLarge,
+                shadowElevation = 0.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE4AFC4))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = RoseAccent.copy(alpha = 0.9f)
+                    )
+                    Text(
+                        text = "搜索款式 / 风格 / 门店",
+                        modifier = Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f),
+                        fontSize = 13.sp
+                    )
+                    Text(
+                        text = "搜索",
+                        color = Color(0xFFC87598),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(0.dp))
+    }
+}
+
+@Composable
+private fun ActivityBannerPlaceholder(modifier: Modifier = Modifier) {
+    val banners = remember {
+        listOf(
+            R.drawable.home_activity_banner_1,
+            R.drawable.home_activity_banner_2
+        )
+    }
+    val pagerState = rememberPagerState(pageCount = { banners.size })
+
+    LaunchedEffect(pagerState) {
+        while (true) {
+            delay(4_000)
+            if (!pagerState.isScrollInProgress) {
+                pagerState.animateScrollToPage((pagerState.currentPage + 1) % banners.size)
+            }
+        }
+    }
+
+    HorizontalPager(
+        state = pagerState,
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(1837f / 856f)
+            .clip(MaterialTheme.shapes.medium)
+    ) { page ->
+        Image(
+            painter = painterResource(id = banners[page]),
+            contentDescription = "活动 Banner",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    }
+}
+
+@Composable
+private fun HomeFeatureNavigation(
+    onRanking: () -> Unit,
+    onAiPick: () -> Unit,
+    onTrend: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+            .height(82.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(13.dp),
+        shadowElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .padding(horizontal = 10.dp, vertical = 0.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HomeFeatureItem(title = "排 行 榜", iconRes = R.drawable.home_feature_rank_icon, onClick = onRanking)
+            HomeFeatureItem(title = "D I Y", iconRes = R.drawable.home_feature_diy_icon, iconOffsetX = 3.dp, onClick = onAiPick)
+            HomeFeatureItem(title = "热 门 趋 势", iconRes = R.drawable.home_feature_trend_icon, onClick = onTrend)
+        }
+    }
+}
+
+@Composable
+private fun HomeFeatureItem(title: String, iconRes: Int, iconOffsetX: androidx.compose.ui.unit.Dp = 0.dp, onClick: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .width(96.dp)
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Image(
+            painter = painterResource(id = iconRes),
+            contentDescription = null,
+            modifier = Modifier
+                .size(58.dp)
+                .offset(x = iconOffsetX),
+            contentScale = ContentScale.Fit
+        )
+        Text(
+            text = title,
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = (-2).dp),
+            fontSize = 12.sp,
+            lineHeight = 13.sp,
+            color = Color(0xFF6F686B),
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+    }
+}
+
+@Composable
+private fun WaterfallStyleCard(
+    style: NailStyle,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val sellingPoint = style.tags.firstOrNull()?.let { "#$it  ${style.vibe}" } ?: style.vibe
+
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick),
+        color = Color.White,
+        shape = RoundedCornerShape(8.dp),
+        shadowElevation = 0.dp
+    ) {
+        Column {
+            GradientThumb(
+                style = style,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.76f),
+                showBorder = false
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White)
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = style.name,
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color(0xFF151318),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.FavoriteBorder,
+                        contentDescription = null,
+                        tint = Color(0xFF777777),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Text(
+                    text = sellingPoint,
+                    color = Color(0xFF9A6A35),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -1748,9 +2239,111 @@ private fun HomeHero(onSearch: () -> Unit) {
 }
 
 @Composable
-private fun HomeSectionHeader(title: String, actionText: String, onAction: () -> Unit) {
+private fun HomeCategoryTabs(
+    selectedCategory: String,
+    onCategoryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val categories = listOf("推荐", "日常", "通勤", "约会", "旅游", "个性")
+    val scrollState = rememberScrollState()
+
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .background(Color.White),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier
+                .horizontalScroll(scrollState)
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            categories.forEach { category ->
+                Box(
+                    modifier = Modifier
+                        .width(78.dp)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    HomeCategoryTab(
+                        text = category,
+                        selected = selectedCategory == category,
+                        onClick = { onCategoryChange(category) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeCategoryTab(
+    text: String,
+    selected: Boolean = false,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) Color.White else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = if (selected) 7.dp else 0.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = text,
+            color = if (selected) RoseAccent else MaterialTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Normal,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(3.dp))
+        Box(
+            modifier = Modifier
+                .width(if (selected) 18.dp else 0.dp)
+                .height(2.dp)
+                .clip(MaterialTheme.shapes.extraLarge)
+                .background(if (selected) RoseAccent else Color.Transparent)
+        )
+    }
+}
+
+private fun filterHomeRecommendationFeed(styles: List<NailStyle>, category: String): List<NailStyle> {
+    if (category == "推荐") return styles
+    val keywords = when (category) {
+        "日常" -> listOf("日常", "纯色", "简约", "裸", "奶油", "通勤")
+        "通勤" -> listOf("通勤", "简约", "法式", "裸", "低调", "纯色")
+        "约会" -> listOf("约会", "甜", "粉", "花", "玫瑰", "温柔")
+        "旅游" -> listOf("旅游", "夏", "海", "度假", "彩", "亮片")
+        "个性" -> listOf("个性", "黑", "棋盘", "金属", "银", "酷", "暗")
+        else -> emptyList()
+    }
+    val matched = styles.filter { style ->
+        val source = buildString {
+            append(style.name)
+            append(' ')
+            append(style.vibe)
+            append(' ')
+            append(style.tags.joinToString(" "))
+        }
+        keywords.any { keyword -> source.contains(keyword, ignoreCase = true) }
+    }
+    return matched.ifEmpty { styles }
+}
+
+@Composable
+private fun HomeSectionHeader(
+    title: String,
+    actionText: String,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
@@ -1955,6 +2548,7 @@ private fun StylesScreen(
 ) {
     var selectedTab by remember { mutableStateOf(StyleBrowseTab.NailShape) }
     var selectedOption by remember { mutableStateOf(nailShapeBrowseOptions.first()) }
+    var sortMode by remember { mutableStateOf("热度高") }
     var query by remember { mutableStateOf("") }
     val options = selectedTab.options()
 
@@ -1964,81 +2558,107 @@ private fun StylesScreen(
 
     val queryMatchedStyles = styles.filter { it.matchesStyleQuery(query) }
     val categoryMatchedStyles = queryMatchedStyles.filter { it.matchesBrowseOption(selectedTab, selectedOption) }
-    val filteredStyles = categoryMatchedStyles.ifEmpty { queryMatchedStyles }
+    val filteredStyles = when (sortMode) {
+        "收藏多" -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }.sortedByDescending { it.tags.size }
+        "新上架" -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }.asReversed()
+        else -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }
+    }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(MaterialTheme.colorScheme.background)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .offset(y = 0.dp)
+                .padding(top = 12.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                StyleSearchField(
                     value = query,
                     onValueChange = { query = it },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    placeholder = { Text("输入关键词") },
-                    shape = MaterialTheme.shapes.large
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(36.dp)
                 )
-                OutlinedButton(
-                    onClick = {
-                        query = ""
-                        selectedOption = options.first()
-                    },
-                    modifier = Modifier.defaultMinSize(minHeight = 56.dp),
-                    shape = MaterialTheme.shapes.medium
+                Surface(
+                    modifier = Modifier
+                        .width(86.dp)
+                        .height(36.dp)
+                        .clickable {
+                            query = ""
+                            selectedOption = options.first()
+                        },
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
                 ) {
-                    Text("筛选")
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), MaterialTheme.shapes.medium)
-            ) {
-                StyleBrowseTab.values().forEach { tab ->
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { selectedTab = tab },
-                        color = if (selectedTab == tab) MaterialTheme.colorScheme.primary.copy(alpha = 0.11f) else Color.Transparent
-                    ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = tab.title,
-                            modifier = Modifier.padding(vertical = 14.dp),
-                            color = if (selectedTab == tab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                            fontSize = 16.sp,
-                            fontWeight = if (selectedTab == tab) FontWeight.Bold else FontWeight.SemiBold,
-                            textAlign = TextAlign.Center
+                            "筛选",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.76f),
+                            maxLines = 1
                         )
                     }
                 }
             }
 
             Row(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+                    .clip(RoundedCornerShape(0.dp))
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(0.dp))
+            ) {
+                StyleBrowseTab.values().forEach { tab ->
+                    Surface(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(32.dp)
+                            .clickable { selectedTab = tab },
+                        color = if (selectedTab == tab) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.White
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = tab.title,
+                                color = if (selectedTab == tab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.84f),
+                                fontSize = 14.sp,
+                                lineHeight = 15.sp,
+                                fontWeight = FontWeight.Normal,
+                                letterSpacing = 24.sp,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 0.dp, top = 6.dp, end = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 LazyColumn(
                     modifier = Modifier
-                        .width(88.dp)
-                        .fillMaxSize()
-                        .clip(MaterialTheme.shapes.medium)
+                        .width(74.dp)
+                        .height((options.size * 44 + 12).dp)
+                        .clip(RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp))
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f), MaterialTheme.shapes.medium),
-                    contentPadding = PaddingValues(vertical = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f), RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp)),
+                    contentPadding = PaddingValues(vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(options) { option ->
                         val selected = selectedOption == option
@@ -2054,31 +2674,191 @@ private fun StylesScreen(
                                 text = option.label,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 6.dp, vertical = 13.dp),
+                                    .padding(horizontal = 4.dp, vertical = 9.dp),
                                 color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.76f),
-                                fontSize = 14.sp,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Normal,
                                 textAlign = TextAlign.Center
                             )
                         }
                     }
                 }
 
-                LazyColumn(
+                Column(
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(bottom = 96.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    if (filteredStyles.isEmpty()) {
-                        item {
-                            EmptyState("没有匹配款式", "换个关键词，或切换到其他${selectedTab.title}小类。")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        listOf("热度高", "收藏多", "新上架").forEach { mode ->
+                            StyleSortChip(
+                                text = mode,
+                                selected = sortMode == mode,
+                                onClick = { sortMode = mode }
+                            )
                         }
-                    } else {
-                        items(filteredStyles) { style ->
-                            StyleGridRow(style = style, onClick = { onStyleClick(style.id) })
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 96.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (filteredStyles.isEmpty()) {
+                            item {
+                                EmptyState("没有匹配款式", "换个关键词，或切换到其他${selectedTab.title}小类。")
+                            }
+                        } else {
+                            items(filteredStyles.chunked(2)) { rowStyles ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowStyles.forEach { style ->
+                                        StyleBrowseGridCard(
+                                            style = style,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = { onStyleClick(style.id) }
+                                        )
+                                    }
+                                    if (rowStyles.size == 1) {
+                                        Spacer(Modifier.weight(1f))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StyleSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                lineHeight = 16.sp
+            ),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 18.dp),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "输入关键词",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                            fontSize = 14.sp,
+                            lineHeight = 16.sp,
+                            maxLines = 1
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun StyleSortChip(text: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .height(30.dp)
+            .clickable(onClick = onClick),
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.small,
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.22f)
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .width(70.dp)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = text,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                fontSize = 13.sp,
+                lineHeight = 13.sp,
+                fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun StyleBrowseGridCard(
+    style: NailStyle,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .height(218.dp)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.small,
+        shadowElevation = 0.dp
+    ) {
+        Column {
+            GradientThumb(
+                style = style,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp),
+                showBorder = false
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                Text(
+                    text = style.name,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = style.tags.firstOrNull() ?: style.vibe,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -2347,11 +3127,13 @@ private data class DiyNailState(
     val effect: String = "裸粉"
 )
 
-private val diyShapeOptions = listOf("小短梯", "短方圆", "中方", "中椭圆", "中短梯", "长梯", "长椭圆", "尖水滴")
+private val diyShapeOptions = listOf("短方", "短圆", "中方", "中椭圆", "中短梯", "长梯", "长椭圆", "尖水滴")
+
+private val DiyHotPink = Color(0xFFD993AE)
 
 private val diyShapeDescriptions = mapOf(
-    "小短梯" to "两侧轻微收窄，前缘平直偏短，适合日常百搭，修饰手型。",
-    "短方圆" to "短款圆润边角，干净耐看，适合通勤与短甲用户。",
+    "短方" to "两侧轻微收窄，前缘平直偏短，适合日常百搭，修饰手型。",
+    "短圆" to "短款圆润边角，干净耐看，适合通勤与短甲用户。",
     "中方" to "线条利落，甲面存在感更强，适合简约纯色和法式。",
     "中椭圆" to "边缘柔和，显手指修长，适合粉色、裸色和细闪。",
     "中短梯" to "自然收窄，兼顾利落与柔和，适合轻法式。",
@@ -2359,6 +3141,18 @@ private val diyShapeDescriptions = mapOf(
     "长椭圆" to "修长温柔，适合渐变、晕染和珠光材质。",
     "尖水滴" to "尖端收束明显，氛围感强，适合精致、仙气或舞台风。"
 )
+
+private fun diyShapeImageRes(shape: String): Int = when (shape) {
+    "短方" -> R.drawable.diy_nail_short_square
+    "短圆" -> R.drawable.diy_nail_short_round
+    "中方" -> R.drawable.diy_nail_medium_square
+    "中椭圆" -> R.drawable.diy_nail_medium_oval
+    "中短梯" -> R.drawable.diy_nail_medium_ladder
+    "长梯" -> R.drawable.diy_nail_long_ladder
+    "长椭圆" -> R.drawable.diy_nail_long_oval
+    "尖水滴" -> R.drawable.diy_nail_stiletto
+    else -> R.drawable.diy_nail_short_square
+}
 
 private val diyColorChoices = listOf(
     DiyColorChoice("裸粉", Color(0xFFF6D3D9)),
@@ -2381,7 +3175,7 @@ private fun DiyDesignerScreen(
     onTryOn: () -> Unit
 ) {
     var step by remember { mutableStateOf(1) }
-    var selectedShape by remember { mutableStateOf<String?>(null) }
+    var selectedShape by remember { mutableStateOf<String?>("短方") }
     var selectedColor by remember { mutableStateOf(diyColorChoices.first()) }
     var overallTab by remember { mutableStateOf("主色") }
     var singleTab by remember { mutableStateOf("颜色") }
@@ -2399,9 +3193,10 @@ private fun DiyDesignerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.White)
+            .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 20.dp)
-            .padding(top = 6.dp, bottom = 12.dp)
+            .padding(horizontal = 16.dp)
+            .padding(top = 12.dp, bottom = 8.dp)
     ) {
         DiyTopHeader(
             title = when (step) {
@@ -2514,7 +3309,7 @@ private fun DiyProgress(step: Int) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 2.dp, bottom = 12.dp)
+            .padding(top = 8.dp, bottom = 8.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2527,8 +3322,8 @@ private fun DiyProgress(step: Int) {
                 Surface(
                     modifier = Modifier.size(30.dp),
                     shape = MaterialTheme.shapes.large,
-                    color = if (complete || active) RoseAccent else Color.White,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, if (complete || active) RoseAccent else Color(0xFFDADADA))
+                    color = if (complete || active) DiyHotPink else Color.White,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (complete || active) DiyHotPink else Color(0xFFDADADA))
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
@@ -2544,7 +3339,7 @@ private fun DiyProgress(step: Int) {
                         modifier = Modifier
                             .weight(1f)
                             .height(2.dp)
-                            .background(if (number < step) RoseAccent else Color(0xFFE1E1E1))
+                            .background(if (number < step) DiyHotPink else Color(0xFFE1E1E1))
                     )
                 }
             }
@@ -2559,7 +3354,7 @@ private fun DiyProgress(step: Int) {
                 val number = index + 1
                 Text(
                     label,
-                    color = if (number <= step) RoseAccent else Color(0xFF666666),
+                    color = if (number <= step) DiyHotPink else Color(0xFF666666),
                     fontSize = 12.sp,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.width(64.dp)
@@ -2577,49 +3372,35 @@ private fun DiyShapeStep(
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .height(168.dp)
+                .height(224.dp)
+                .offset(y = (-12).dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("选择喜欢的甲型", fontSize = 27.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                Text("为你定制专属美甲设计", fontSize = 17.sp, color = Color(0xFF333333))
-                Surface(
-                    modifier = Modifier.padding(top = 14.dp),
-                    color = RoseTint.copy(alpha = 0.55f),
-                    shape = MaterialTheme.shapes.large
-                ) {
-                    Text(
-                        "📏  测量指甲尺寸  ›",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                        color = RoseAccent,
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp
-                    )
-                }
-            }
-            DiyHeroHand(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(width = 210.dp, height = 168.dp)
+            Image(
+                painter = painterResource(id = R.drawable.diy_shape_hero),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.BottomCenter
             )
         }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = Color.White,
-            shape = MaterialTheme.shapes.large,
-            shadowElevation = 4.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(Modifier.padding(9.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset(y = (-46).dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 diyShapeOptions.chunked(4).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                         row.forEach { shape ->
@@ -2632,38 +3413,43 @@ private fun DiyShapeStep(
                         }
                     }
                 }
-            }
-        }
 
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = RoseTint.copy(alpha = 0.55f),
-            shape = MaterialTheme.shapes.medium
-        ) {
-            Row(
-                modifier = Modifier.padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("♥  甲型介绍", color = RoseAccent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        diyShapeDescriptions[selectedShape] ?: "请选择一种甲型，系统会根据甲型生成整体设计预览。",
-                        color = Color(0xFF333333),
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp
-                    )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = RoseTint.copy(alpha = 0.78f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("♥  甲型介绍", color = DiyHotPink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            Text(
+                                diyShapeDescriptions[selectedShape] ?: "请选择一种甲型，系统会根据甲型生成整体设计预览。",
+                                color = Color(0xFF333333),
+                                fontSize = 14.sp,
+                                lineHeight = 22.sp
+                            )
+                        }
+                        Image(
+                            painter = painterResource(id = diyShapeImageRes(selectedShape ?: "短方")),
+                            contentDescription = null,
+                            modifier = Modifier.size(width = 64.dp, height = 78.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
                 }
-                DiyNailPreview(shape = selectedShape ?: "短方圆", color = Color(0xFFF5C9CF), modifier = Modifier.size(width = 58.dp, height = 78.dp))
             }
-        }
 
-        Spacer(Modifier.weight(1f))
-        DiyPrimaryButton(
-            text = "下一步：整体设计",
-            enabled = selectedShape != null,
-            onClick = onNext
-        )
+            Spacer(Modifier.weight(1f))
+            DiyPrimaryButton(
+                text = "下一步：整体设计",
+                enabled = selectedShape != null,
+                onClick = onNext
+            )
+        }
     }
 }
 
@@ -2671,37 +3457,28 @@ private fun DiyShapeStep(
 private fun DiyShapeCard(shape: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         modifier = modifier
-            .height(106.dp)
+            .height(108.dp)
             .clickable(onClick = onClick),
         color = Color.White,
-        shape = MaterialTheme.shapes.medium,
-        border = androidx.compose.foundation.BorderStroke(1.5.dp, if (selected) RoseAccent else Color(0xFFE8E8E8))
+        shape = RoundedCornerShape(12.dp),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, if (selected) DiyHotPink else Color(0xFFE8E8E8))
     ) {
-        Box(Modifier.fillMaxSize()) {
-            if (selected) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(7.dp)
-                        .size(24.dp),
-                    shape = MaterialTheme.shapes.large,
-                    color = RoseAccent
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("✓", color = Color.White, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-            Column(
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = 8.dp, bottom = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Image(
+                painter = painterResource(id = diyShapeImageRes(shape)),
+                contentDescription = null,
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = 9.dp, bottom = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceBetween
-            ) {
-                DiyNailPreview(shape = shape, color = Color(0xFFF7C9D0), modifier = Modifier.size(width = 38.dp, height = 60.dp))
-                Text(shape, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
-            }
+                    .fillMaxWidth()
+                    .height(70.dp),
+                contentScale = ContentScale.Fit
+            )
+            Text(shape, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
         }
     }
 }
@@ -3137,7 +3914,7 @@ private fun nailPathForShape(shape: String, w: Float, h: Float): Path {
                 cubicTo(w * 0.20f, h * 0.65f, w * 0.16f, h * 0.16f, w * 0.22f, top)
                 close()
             }
-            "小短梯" -> {
+            "短方" -> {
                 moveTo(w * 0.20f, h * 0.12f)
                 quadraticTo(w * 0.22f, top, w * 0.34f, top)
                 lineTo(w * 0.66f, top)
@@ -3147,7 +3924,7 @@ private fun nailPathForShape(shape: String, w: Float, h: Float): Path {
                 cubicTo(w * 0.24f, h * 0.78f, w * 0.16f, h * 0.38f, w * 0.20f, h * 0.12f)
                 close()
             }
-            "短方圆" -> {
+            "短圆" -> {
                 moveTo(w * 0.28f, top)
                 quadraticTo(w * 0.18f, top, w * 0.18f, h * 0.18f)
                 lineTo(w * 0.18f, h * 0.82f)
@@ -3205,16 +3982,21 @@ private fun DiyHeroHand(modifier: Modifier = Modifier) {
 
 @Composable
 private fun DiyPrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(58.dp),
-        shape = MaterialTheme.shapes.large,
-        colors = ButtonDefaults.buttonColors(containerColor = RoseAccent, disabledContainerColor = RoseAccent.copy(alpha = 0.32f))
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
     ) {
-        Text(text, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier
+                .fillMaxWidth(0.86f)
+                .height(52.dp),
+            shape = MaterialTheme.shapes.large,
+            colors = ButtonDefaults.buttonColors(containerColor = DiyHotPink, disabledContainerColor = DiyHotPink.copy(alpha = 0.32f))
+        ) {
+            Text(text, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -3265,72 +4047,146 @@ private fun FilterPill(text: String, selected: Boolean, modifier: Modifier = Mod
 
 @Composable
 private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
-    var sortMode by remember { mutableStateOf("综合排序") }
-    var distanceFilter by remember { mutableStateOf("不限距离") }
-    var onlyHighMatch by remember { mutableStateOf(false) }
-    val filteredStores = remember(stores, sortMode, distanceFilter, onlyHighMatch) {
-        stores
-            .filter { store ->
-                !onlyHighMatch || store.matchScore >= 90
+    var activeFilter by remember { mutableStateOf("附近") }
+    var distanceFilter by remember { mutableStateOf("距离最近") }
+    var ratingFilter by remember { mutableStateOf<String?>(null) }
+    var priceFilter by remember { mutableStateOf<String?>(null) }
+    var showPriceRangeDialog by remember { mutableStateOf(false) }
+    var pendingMinPrice by remember { mutableStateOf("") }
+    var pendingMaxPrice by remember { mutableStateOf("") }
+    var minPrice by remember { mutableStateOf<Int?>(null) }
+    var maxPrice by remember { mutableStateOf<Int?>(null) }
+
+    val filteredStores = remember(stores, activeFilter, distanceFilter, ratingFilter, priceFilter, minPrice, maxPrice) {
+        var result = stores.asSequence()
+
+        result = when (distanceFilter) {
+            "3km内" -> result.filter { parseDistanceMeters(it.distance) <= 3000 }
+            "10km内" -> result.filter { parseDistanceMeters(it.distance) <= 10000 }
+            else -> result
+        }
+
+        if (ratingFilter == "只看4星") {
+            result = result.filter { (it.score.toFloatOrNull() ?: 0f) >= 4f }
+        }
+
+        if (priceFilter == "输入价格区间") {
+            result = result.filter { store ->
+                val price = parsePriceValue(store.priceBand)
+                val aboveMin = minPrice?.let { price >= it * 100 } ?: true
+                val belowMax = maxPrice?.let { price <= it * 100 } ?: true
+                aboveMin && belowMax
             }
-            .filter { store ->
-                when (distanceFilter) {
-                    "1km内" -> parseDistanceMeters(store.distance) <= 1000
-                    "5km内" -> parseDistanceMeters(store.distance) <= 5000
-                    else -> true
+        }
+
+        val list = result.toList()
+        when (activeFilter) {
+            "评分" -> list.sortedByDescending { it.score.toFloatOrNull() ?: 0f }
+            "价格" -> if (priceFilter == "价格最高") {
+                list.sortedByDescending { parsePriceValue(it.priceBand) }
+            } else {
+                list.sortedBy { parsePriceValue(it.priceBand) }
+            }
+            else -> list.sortedBy { parseDistanceMeters(it.distance) }
+        }
+    }
+
+    if (showPriceRangeDialog) {
+        AlertDialog(
+            onDismissRequest = { showPriceRangeDialog = false },
+            title = { Text("输入价格区间") },
+            text = {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = pendingMinPrice,
+                        onValueChange = { pendingMinPrice = it.filter(Char::isDigit) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("最低") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = pendingMaxPrice,
+                        onValueChange = { pendingMaxPrice = it.filter(Char::isDigit) },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("最高") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        minPrice = pendingMinPrice.toIntOrNull()
+                        maxPrice = pendingMaxPrice.toIntOrNull()
+                        priceFilter = "输入价格区间"
+                        activeFilter = "价格"
+                        showPriceRangeDialog = false
+                    }
+                ) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPriceRangeDialog = false }) {
+                    Text("取消")
                 }
             }
-            .let { list ->
-                when (sortMode) {
-                    "距离最近" -> list.sortedBy { parseDistanceMeters(it.distance) }
-                    "评分最高" -> list.sortedByDescending { it.score.toFloatOrNull() ?: 0f }
-                    "匹配优先" -> list.sortedByDescending { it.matchScore }
-                    else -> list.sortedWith(compareByDescending<Store> { it.matchScore }.thenBy { parseDistanceMeters(it.distance) })
-                }
-            }
+        )
     }
-    if (stores.isEmpty()) {
-        EmptyState("暂无可预约门店", "接入真实门店数据后，这里会展示支持预约的门店与时段。")
-        return
-    }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+
+    Column(
+        modifier = Modifier.fillMaxSize()
     ) {
-        item {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 10.dp)
+        ) {
             BookingFilterBar(
-                sortMode = sortMode,
+                activeFilter = activeFilter,
                 distanceFilter = distanceFilter,
-                onlyHighMatch = onlyHighMatch,
-                onSortChange = { sortMode = it },
-                onDistanceChange = { distanceFilter = it },
-                onToggleHighMatch = { onlyHighMatch = !onlyHighMatch }
+                ratingFilter = ratingFilter,
+                priceFilter = priceFilter,
+                onDistanceFilterChange = {
+                    activeFilter = "附近"
+                    distanceFilter = it
+                },
+                onRatingFilterChange = {
+                    activeFilter = "评分"
+                    ratingFilter = it
+                },
+                onPriceFilterChange = {
+                    activeFilter = "价格"
+                    priceFilter = it
+                    if (it != "输入价格区间") {
+                        minPrice = null
+                        maxPrice = null
+                    }
+                },
+                onPriceRangeClick = {
+                    activeFilter = "价格"
+                    pendingMinPrice = minPrice?.toString().orEmpty()
+                    pendingMaxPrice = maxPrice?.toString().orEmpty()
+                    showPriceRangeDialog = true
+                }
             )
         }
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                shape = MaterialTheme.shapes.medium
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("预约礼", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(8.dp))
-                    Text("试戴同款到店可享新客立减", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f), fontSize = 13.sp)
-                    Spacer(Modifier.weight(1f))
-                    Text("筛选", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-        if (filteredStores.isEmpty()) {
-            item { EmptyState("没有匹配门店", "放宽距离或匹配度筛选后再试。") }
+
+        if (stores.isEmpty()) {
+            EmptyState("暂无可预约门店", "接入真实门店数据后，这里会展示支持预约的门店与时段。")
         } else {
-            items(filteredStores) { store ->
-                StoreCard(store = store, onClick = { onStoreClick(store.id) })
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 112.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (filteredStores.isEmpty()) {
+                    item { EmptyState("暂无门店", "调整筛选后再试。") }
+                } else {
+                    items(filteredStores) { store ->
+                        StoreCard(store = store, onClick = { onStoreClick(store.id) })
+                    }
+                }
             }
         }
     }
@@ -3338,54 +4194,121 @@ private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
 
 @Composable
 private fun BookingFilterBar(
-    sortMode: String,
+    activeFilter: String,
     distanceFilter: String,
-    onlyHighMatch: Boolean,
-    onSortChange: (String) -> Unit,
-    onDistanceChange: (String) -> Unit,
-    onToggleHighMatch: () -> Unit
+    ratingFilter: String?,
+    priceFilter: String?,
+    onDistanceFilterChange: (String) -> Unit,
+    onRatingFilterChange: (String) -> Unit,
+    onPriceFilterChange: (String) -> Unit,
+    onPriceRangeClick: () -> Unit
 ) {
-    val sortOptions = listOf("综合排序", "距离最近", "评分最高", "匹配优先")
-    val distanceOptions = listOf("不限距离", "1km内", "5km内")
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BookingFilterChip("厦门大学附近", Icons.Rounded.Storefront, selected = false) {}
-            sortOptions.forEach { option ->
-                BookingFilterChip(option, null, selected = sortMode == option) { onSortChange(option) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(30.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        BookingFilterMenu(
+            text = "附近",
+            selected = activeFilter == "附近",
+            selectedOption = distanceFilter,
+            options = listOf("距离最近", "3km内", "10km内"),
+            onOptionClick = onDistanceFilterChange
+        )
+        BookingFilterMenu(
+            text = "评分",
+            selected = activeFilter == "评分",
+            selectedOption = ratingFilter,
+            options = listOf("评分最高", "只看4星"),
+            onOptionClick = onRatingFilterChange
+        )
+        BookingFilterMenu(
+            text = "价格",
+            selected = activeFilter == "价格",
+            selectedOption = priceFilter,
+            options = listOf("价格最低", "价格最高", "输入价格区间"),
+            onOptionClick = { option ->
+                if (option == "输入价格区间") {
+                    onPriceRangeClick()
+                } else {
+                    onPriceFilterChange(option)
+                }
             }
-        }
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        )
+    }
+}
+
+@Composable
+private fun BookingFilterMenu(
+    text: String,
+    selected: Boolean,
+    selectedOption: String?,
+    options: List<String>,
+    onOptionClick: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box {
+        BookingFilterChip(
+            text = text,
+            selected = selected,
+            expanded = expanded,
+            onClick = { expanded = true }
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
         ) {
-            distanceOptions.forEach { option ->
-                BookingFilterChip(option, null, selected = distanceFilter == option) { onDistanceChange(option) }
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            option,
+                            fontWeight = if (selectedOption == option) FontWeight.SemiBold else FontWeight.Normal
+                        )
+                    },
+                    onClick = {
+                        expanded = false
+                        onOptionClick(option)
+                    }
+                )
             }
-            BookingFilterChip("手部", null, selected = false) {}
-            BookingFilterChip("高匹配", Icons.Rounded.AutoAwesome, selected = onlyHighMatch, onClick = onToggleHighMatch)
         }
     }
 }
 
 @Composable
-private fun BookingFilterChip(text: String, icon: ImageVector?, selected: Boolean, onClick: () -> Unit) {
+private fun BookingFilterChip(text: String, selected: Boolean, expanded: Boolean, onClick: () -> Unit) {
+    val displayText = text.toList().joinToString(" ")
     Surface(
-        modifier = Modifier.clickable(onClick = onClick),
-        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface,
-        shape = MaterialTheme.shapes.medium,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        modifier = Modifier
+            .width(76.dp)
+            .height(28.dp)
+            .clickable(onClick = onClick),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = if (selected) 0.24f else 0.18f),
+        shape = RoundedCornerShape(8.dp)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            modifier = Modifier.fillMaxSize(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.Center
         ) {
-            if (icon != null) Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp), tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f))
-            Text(text, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+            Text(
+                displayText,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                letterSpacing = 0.5.sp
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                if (expanded) "▲" else "▼",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }
@@ -3394,6 +4317,18 @@ private fun parseDistanceMeters(distance: String): Int {
     val raw = distance.trim()
     val number = raw.filter { it.isDigit() || it == '.' }.toFloatOrNull() ?: return Int.MAX_VALUE
     return if (raw.contains("km", ignoreCase = true)) (number * 1000).toInt() else number.toInt()
+}
+
+private fun parsePriceValue(price: String): Int {
+    val number = Regex("""\d+(\.\d+)?""").find(price)?.value?.toFloatOrNull() ?: return Int.MAX_VALUE
+    return (number * 100).toInt()
+}
+
+private fun averagePriceText(store: Store): String {
+    val existingPrice = Regex("""\d+(\.\d+)?""").find(store.priceBand)?.value?.toFloatOrNull()
+    val price = existingPrice?.toInt()
+        ?: (88 + (store.id + store.name).fold(0) { acc, char -> acc + char.code }.floorMod(80))
+    return "人均¥$price"
 }
 
 @Composable
@@ -3443,14 +4378,14 @@ private fun ProfileScreen(
                 ProfileQuickCard(
                     title = "我的收藏",
                     subtitle = "$favoritesCount 个款式",
-                    icon = Icons.Rounded.FavoriteBorder,
+                    imageRes = R.drawable.profile_icon_favorites,
                     modifier = Modifier.weight(1f),
                     onClick = onFavorites
                 )
                 ProfileQuickCard(
                     title = "试戴记录",
                     subtitle = "$tryOnHistoryCount 条记录",
-                    icon = Icons.Rounded.AutoAwesome,
+                    imageRes = R.drawable.profile_icon_tryon_history,
                     modifier = Modifier.weight(1f),
                     onClick = onTryOnHistory
                 )
@@ -3472,11 +4407,11 @@ private fun ProfileScreen(
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("我的预约", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Row(horizontalArrangement = Arrangement.SpaceAround, modifier = Modifier.fillMaxWidth()) {
-                        ProfileActionIcon("订单", Icons.Rounded.CalendarMonth, onRecords)
-                        ProfileActionIcon("评价", Icons.Rounded.Star) {
+                        ProfileActionIcon("订单", imageRes = R.drawable.profile_booking_order, onClick = onRecords)
+                        ProfileActionIcon("评价", imageRes = R.drawable.profile_booking_review) {
                             Toast.makeText(context, "评价功能待接入", Toast.LENGTH_SHORT).show()
                         }
-                        ProfileActionIcon("售后", Icons.Rounded.Storefront) {
+                        ProfileActionIcon("售后", imageRes = R.drawable.profile_booking_after_sale) {
                             Toast.makeText(context, "售后功能待接入", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -3502,7 +4437,8 @@ private fun ProfileScreen(
 private fun ProfileQuickCard(
     title: String,
     subtitle: String,
-    icon: ImageVector,
+    icon: ImageVector? = null,
+    imageRes: Int? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
@@ -3514,9 +4450,18 @@ private fun ProfileQuickCard(
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+            if (imageRes != null) {
+                Image(
+                    painter = painterResource(id = imageRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(38.dp),
+                    contentScale = ContentScale.Fit
+                )
+            } else if (icon != null) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+            }
             Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             Text(subtitle, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f), fontSize = 12.sp)
         }
@@ -3524,7 +4469,12 @@ private fun ProfileQuickCard(
 }
 
 @Composable
-private fun ProfileActionIcon(title: String, icon: ImageVector, onClick: () -> Unit) {
+private fun ProfileActionIcon(
+    title: String,
+    icon: ImageVector? = null,
+    imageRes: Int? = null,
+    onClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .clip(MaterialTheme.shapes.medium)
@@ -3533,7 +4483,16 @@ private fun ProfileActionIcon(title: String, icon: ImageVector, onClick: () -> U
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+        if (imageRes != null) {
+            Image(
+                painter = painterResource(id = imageRes),
+                contentDescription = title,
+                modifier = Modifier.size(28.dp),
+                contentScale = ContentScale.Fit
+            )
+        } else if (icon != null) {
+            Icon(icon, contentDescription = title, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+        }
         Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     }
 }
@@ -4722,93 +5681,139 @@ private fun StoreCard(store: Store, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(178.dp)
+            .height(142.dp)
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(6.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+        border = null
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            modifier = Modifier.fillMaxSize()
         ) {
-            StoreCover(store)
+            StoreCover(
+                store = store,
+                modifier = Modifier
+                    .width(126.dp)
+                    .fillMaxHeight(),
+                label = "店铺头像",
+                showStatus = false
+            )
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .fillMaxHeight()
+                    .background(Color.White)
+                    .padding(start = 16.dp, top = 12.dp, end = 14.dp, bottom = 12.dp),
+                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(verticalAlignment = Alignment.Top) {
+                Text(
+                    store.name,
+                    modifier = Modifier.fillMaxWidth(),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    lineHeight = 19.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Start
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Text(
-                        store.name,
-                        modifier = Modifier.weight(1f),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp,
+                        text = "${store.statusText}  ${store.openHours}",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Text(store.distance, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f), fontSize = 12.sp)
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("★ ${store.score}", color = Color(0xFFFF6B2C), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Text("${store.reviewCount.coerceAtLeast(0)}条评价", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f), fontSize = 12.sp)
-                    Text(store.priceBand, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f), fontSize = 12.sp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = averagePriceText(store),
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f),
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = store.distance,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f),
+                        fontSize = 12.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(store.statusText, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                    Text(store.openHours, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.72f), fontSize = 12.sp)
-                }
-                Text(store.address.ifBlank { store.area }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Surface(color = Color(0xFFFFF3D9), shape = MaterialTheme.shapes.small) {
-                        Text(store.couponText, modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), color = Color(0xFF9B6415), fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    }
-                    Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), shape = MaterialTheme.shapes.small) {
-                        Text("匹配 ${store.matchScore}%", modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    }
-                }
-                Text("最近可约：${store.nearestSlot}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    store.tags.take(2).forEach { tag ->
-                        Surface(color = RoseTint, shape = MaterialTheme.shapes.small) {
-                            Text(tag, modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp), color = RoseAccent, fontSize = 10.sp, maxLines = 1)
-                        }
-                    }
-                    Spacer(Modifier.weight(1f))
-                    if (store.salesText.isNotBlank()) {
-                        Text(store.salesText, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.48f), fontSize = 11.sp, maxLines = 1)
-                    }
-                }
+                Text(
+                    store.address.ifBlank { store.area },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Start,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    if (store.nearestSlot.isBlank()) "最近可约" else "最近可约：${store.nearestSlot}",
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Start,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
 }
 
 @Composable
-private fun StoreCover(store: Store) {
+private fun StoreCover(
+    store: Store,
+    modifier: Modifier = Modifier.size(92.dp),
+    label: String = store.name.take(4),
+    showStatus: Boolean = true
+) {
     Box(
-        modifier = Modifier
-            .size(92.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .background(Brush.linearGradient(listOf(store.coverTone, store.coverTone.copy(alpha = 0.58f))))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f), MaterialTheme.shapes.medium),
+        modifier = modifier
+            .clip(RoundedCornerShape(0.dp))
+            .background(Brush.linearGradient(listOf(store.coverTone.copy(alpha = 0.76f), store.coverTone.copy(alpha = 0.46f))))
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(0.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Icon(Icons.Rounded.Storefront, contentDescription = null, tint = Color.White.copy(alpha = 0.86f), modifier = Modifier.size(28.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Icon(Icons.Rounded.Storefront, contentDescription = null, tint = Color.White.copy(alpha = 0.82f), modifier = Modifier.size(if (showStatus) 24.dp else 22.dp))
             Text(
-                store.name.take(4),
+                label,
                 color = Color.White,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = if (showStatus) 13.sp else 18.sp,
+                lineHeight = if (showStatus) 14.sp else 20.sp,
+                fontWeight = FontWeight.Medium,
                 textAlign = TextAlign.Center,
                 maxLines = 2
             )
-            Surface(color = Color.Black.copy(alpha = 0.2f), shape = MaterialTheme.shapes.small) {
-                Text(store.statusText, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp), color = Color.White, fontSize = 11.sp)
+            if (showStatus) {
+                Surface(color = Color.Black.copy(alpha = 0.2f), shape = MaterialTheme.shapes.small) {
+                    Text(
+                        store.statusText,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        color = Color.White,
+                        fontSize = 10.sp
+                    )
+                }
             }
         }
     }
@@ -4834,12 +5839,19 @@ private fun TagRow(tags: List<String>) {
 }
 
 @Composable
-private fun GradientThumb(style: NailStyle, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
+private fun GradientThumb(style: NailStyle, modifier: Modifier = Modifier, showBorder: Boolean = true) {
+    val thumbModifier = if (showBorder) {
+        modifier
             .clip(MaterialTheme.shapes.medium)
             .background(Brush.linearGradient(style.colors))
             .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), MaterialTheme.shapes.medium)
+    } else {
+        modifier
+            .background(Brush.linearGradient(style.colors))
+    }
+
+    Box(
+        modifier = thumbModifier
     ) {
         val imageUrl = style.imageUrl
         if (!imageUrl.isNullOrBlank()) {
