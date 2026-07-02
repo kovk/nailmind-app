@@ -37,6 +37,9 @@ interface NailMindApiService {
     @GET("api/styles/search")
     suspend fun searchStyles(@Query("q") query: String): SearchResponse
 
+    @POST("api/assistant/meimei/chat")
+    suspend fun meimeiChat(@Body request: MeimeiChatRequest): MeimeiChatResponse
+
     @GET("api/styles/{styleId}")
     suspend fun styleDetail(@Path("styleId") styleId: String): StyleDetailResponse
 

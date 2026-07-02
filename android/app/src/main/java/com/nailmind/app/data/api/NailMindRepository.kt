@@ -56,6 +56,9 @@ class NailMindRepository(
         response.copy(items = response.items.map { it.normalized() })
     }
 
+    suspend fun meimeiChat(message: String, handImageUrl: String? = null, handImageKey: String? = null): MeimeiChatResponse =
+        service.meimeiChat(MeimeiChatRequest(message = message, handImageUrl = handImageUrl, handImageKey = handImageKey)).normalized()
+
     suspend fun styleDetail(styleId: String): StyleDetailResponse = service.styleDetail(styleId).let { response ->
         response.copy(style = response.style.normalized())
     }

@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -53,6 +54,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -91,7 +93,6 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -100,7 +101,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -108,7 +108,9 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -140,10 +142,13 @@ import com.nailmind.app.data.api.AuthResponse
 import com.nailmind.app.data.api.AuthUserDto
 import com.nailmind.app.data.api.BookingDto
 import com.nailmind.app.data.api.HomeResponse
+import com.nailmind.app.data.api.MeimeiChatResponse
+import com.nailmind.app.data.api.MeimeiRecommendationDto
 import com.nailmind.app.data.api.NailMindApiClient
 import com.nailmind.app.data.api.NailMindRepository
 import com.nailmind.app.data.api.SettingsResponse
 import com.nailmind.app.data.api.StoreDto
+import com.nailmind.app.data.api.StyleTagGroupsDto
 import com.nailmind.app.data.api.StyleDto
 import com.nailmind.app.data.api.TryOnHistoryItemDto
 import com.nailmind.app.data.config.AppConfig
@@ -182,6 +187,7 @@ private sealed interface Screen {
     data class TryOnResult(val styleId: String, val jobId: String) : Screen
     data object TryOnHistory : Screen
     data object DiyDesigner : Screen
+    data object Xiaomei : Screen
     data object Favorites : Screen
     data object BookingRecords : Screen
     data class StoreDetail(val storeId: String, val styleId: String? = null) : Screen
@@ -206,6 +212,7 @@ private data class NailStyle(
     val skinTone: String,
     val colors: List<Color>,
     val tags: List<String>,
+    val tagGroups: StyleTagGroupsDto = StyleTagGroupsDto(),
     val imageUrl: String? = null,
     val tryOnStyleId: Int? = null
 )
@@ -222,14 +229,14 @@ private data class StyleBrowseOption(
 )
 
 private val nailShapeBrowseOptions = listOf(
-    StyleBrowseOption("短方", listOf("短方", "小短梯", "短梯", "方圆")),
-    StyleBrowseOption("短圆", listOf("短圆", "短方圆", "短椭圆", "椭圆", "裸", "优雅")),
-    StyleBrowseOption("中方", listOf("中方", "方形", "经典", "红")),
-    StyleBrowseOption("中椭圆", listOf("中椭圆", "椭圆", "玫瑰", "粉")),
-    StyleBrowseOption("中短梯", listOf("中短梯", "梯形", "莫兰迪", "雾霾")),
-    StyleBrowseOption("长梯", listOf("长梯", "闪钻", "奢华", "银河")),
-    StyleBrowseOption("长椭圆", listOf("长椭圆", "流星", "丝绒", "大理石")),
-    StyleBrowseOption("尖水滴", listOf("尖水滴", "长方", "暗黑", "深海", "酒红"))
+    StyleBrowseOption("短方", listOf("短方")),
+    StyleBrowseOption("短圆", listOf("短圆")),
+    StyleBrowseOption("中方", listOf("中方")),
+    StyleBrowseOption("中椭圆", listOf("中椭圆")),
+    StyleBrowseOption("中短梯", listOf("中短梯")),
+    StyleBrowseOption("长梯", listOf("长梯")),
+    StyleBrowseOption("长椭圆", listOf("长椭圆")),
+    StyleBrowseOption("尖水滴", listOf("尖水滴"))
 )
 
 private val effectBrowseOptions = listOf(
@@ -244,15 +251,15 @@ private val effectBrowseOptions = listOf(
 )
 
 private val vibeBrowseOptions = listOf(
-    StyleBrowseOption("韩系", listOf("韩", "奶油", "豆沙", "蜜桃", "裸")),
-    StyleBrowseOption("日系", listOf("日", "樱花", "马卡龙", "薄荷")),
-    StyleBrowseOption("中式", listOf("中式", "新中式", "酒红", "朱砂", "玫瑰金")),
-    StyleBrowseOption("欧美", listOf("欧美", "暗黑", "深海", "经典红")),
-    StyleBrowseOption("节庆", listOf("节庆", "红", "金", "彩虹", "银河")),
-    StyleBrowseOption("甜美", listOf("甜美", "粉", "蜜桃", "马卡龙", "樱花")),
-    StyleBrowseOption("日常", listOf("日常", "裸", "奶油白", "珍珠白", "豆沙")),
-    StyleBrowseOption("酷感", listOf("酷", "暗黑", "深海", "雾霾蓝")),
-    StyleBrowseOption("极繁", listOf("极繁", "闪钻", "奢华", "大理石", "流星"))
+    StyleBrowseOption("韩系", listOf("韩系")),
+    StyleBrowseOption("日系", listOf("日系")),
+    StyleBrowseOption("中式", listOf("中式")),
+    StyleBrowseOption("欧美", listOf("欧美")),
+    StyleBrowseOption("节庆", listOf("节庆")),
+    StyleBrowseOption("甜美", listOf("甜美")),
+    StyleBrowseOption("日常", listOf("日常")),
+    StyleBrowseOption("酷感", listOf("酷感")),
+    StyleBrowseOption("极繁", listOf("极繁"))
 )
 
 private data class Store(
@@ -466,6 +473,36 @@ private val reservationSampleStores: List<Store> = listOf(
 private val stores: List<Store> = reservationSampleStores
 private val defaultHotKeywords: List<String> = emptyList()
 
+private fun safeStyleColor(raw: String): Color {
+    val value = raw.trim()
+    if (value.isBlank()) return Color(0xFFF3CBD6)
+    return runCatching { Color(android.graphics.Color.parseColor(value)) }.getOrElse {
+        when {
+            "裸" in value || "粉" in value -> Color(0xFFF3CBD6)
+            "奶" in value || "白" in value || "珍珠" in value -> Color(0xFFF7F2EA)
+            "红" in value || "玫瑰" in value -> Color(0xFFC85B5D)
+            "橄榄" in value || "绿" in value -> Color(0xFF8FA36F)
+            "黑" in value -> Color(0xFF171414)
+            "银" in value || "灰" in value -> Color(0xFFB8B2B0)
+            "蓝" in value -> Color(0xFF9EB8D8)
+            "棕" in value || "咖" in value || "茶" in value -> Color(0xFFC7A28A)
+            "金" in value -> Color(0xFFD7B15E)
+            else -> Color(0xFFF3CBD6)
+        }
+    }
+}
+
+private fun safeStyleColors(rawColors: List<String>): List<Color> {
+    val parsed = rawColors.map(::safeStyleColor).ifEmpty {
+        listOf(Color(0xFFF3CBD6), Color(0xFFF7F2EA))
+    }
+    return if (parsed.size == 1) {
+        listOf(parsed.first(), parsed.first().copy(alpha = 0.72f))
+    } else {
+        parsed
+    }
+}
+
 private fun StyleDto.toUi(): NailStyle = NailStyle(
     id = id,
     name = name,
@@ -473,8 +510,9 @@ private fun StyleDto.toUi(): NailStyle = NailStyle(
     price = price,
     nailType = nailType,
     skinTone = skinTone,
-    colors = colors.map { Color(android.graphics.Color.parseColor(it)) },
+    colors = safeStyleColors(colors),
     tags = tags,
+    tagGroups = tagGroups ?: StyleTagGroupsDto(),
     imageUrl = imageUrl,
     tryOnStyleId = tryOnStyleId
 )
@@ -643,7 +681,9 @@ fun NailMindApp() {
     val repository = remember { NailMindRepository() }
     val coroutineScope = rememberCoroutineScope()
     var currentTab by remember { mutableStateOf(MainTab.Home) }
-    var showXiaomeiAssistant by remember { mutableStateOf(false) }
+    var xiaomeiInput by rememberSaveable { mutableStateOf("") }
+    var xiaomeiLoading by remember { mutableStateOf(false) }
+    val xiaomeiMessages = remember { mutableStateListOf<XiaomeiChatMessage>() }
     val stack = remember {
         mutableStateListOf<Screen>(
             if (sharedPreferences.getString(AppConfig.authTokenPreference, null).isNullOrBlank()) Screen.Login else Screen.Tab(MainTab.Home)
@@ -658,6 +698,10 @@ fun NailMindApp() {
     var authLoading by remember { mutableStateOf(false) }
     var authError by remember { mutableStateOf<String?>(null) }
     var styleItems by remember { mutableStateOf(styles) }
+    var styleBrowseTabName by rememberSaveable { mutableStateOf(StyleBrowseTab.NailShape.name) }
+    var styleBrowseOptionLabel by rememberSaveable { mutableStateOf(nailShapeBrowseOptions.first().label) }
+    var styleBrowseSortMode by rememberSaveable { mutableStateOf("热度高") }
+    var styleBrowseQuery by rememberSaveable { mutableStateOf("") }
     var homeRecommended by remember { mutableStateOf(styles.take(2)) }
     var homeHot by remember { mutableStateOf(styles) }
     var hotKeywords by remember { mutableStateOf(defaultHotKeywords) }
@@ -945,30 +989,43 @@ fun NailMindApp() {
         }
     }
 
-    suspend fun bootstrapData() {
-        val me = repository.authMe().user.toUi()
+    suspend fun loadPublicCatalog() {
         val home = repository.home()
         val fetchedStyles = repository.styles().items.map { it.toUi() }.filter { !it.imageUrl.isNullOrBlank() }
-        val fetchedFavorites = repository.favorites().items.map { it.id }
-        val fetchedStores = repository.stores().items.map { it.toUi() }.ifEmpty { reservationSampleStores }
-        val fetchedBookings = repository.bookings().items.map { it.toUi() }
-        val fetchedSettings = repository.settings().toUi()
-        val fetchedTryOnHistory = repository.tryOnHistory().items
+        val fetchedStores = runCatching { repository.stores().items.map { it.toUi() } }
+            .getOrElse { emptyList() }
+            .ifEmpty { reservationSampleStores }
 
-        authUser = me
         styleItems = fetchedStyles
-        favorites.clear()
-        favorites.addAll(fetchedFavorites)
         storeItems = fetchedStores
-        bookingRecords = fetchedBookings
-        userSettings = fetchedSettings
-        tryOnHistoryItems = fetchedTryOnHistory
         hotKeywords = home.hotKeywords
         homeRecommended = home.recommended.map { it.toUi() }.filter { !it.imageUrl.isNullOrBlank() }
         homeHot = home.hot.map { it.toUi() }.filter { !it.imageUrl.isNullOrBlank() }
         searchResults = styleItems
         if (selectedStoreId !in storeItems.map { it.id }) {
             selectedStoreId = storeItems.firstOrNull()?.id.orEmpty()
+        }
+    }
+
+    suspend fun loadUserData() {
+        val me = repository.authMe().user.toUi()
+        val fetchedFavorites = repository.favorites().items.map { it.id }
+        val fetchedBookings = repository.bookings().items.map { it.toUi() }
+        val fetchedSettings = repository.settings().toUi()
+        val fetchedTryOnHistory = repository.tryOnHistory().items
+
+        authUser = me
+        favorites.clear()
+        favorites.addAll(fetchedFavorites)
+        bookingRecords = fetchedBookings
+        userSettings = fetchedSettings
+        tryOnHistoryItems = fetchedTryOnHistory
+    }
+
+    suspend fun bootstrapData() {
+        loadPublicCatalog()
+        if (!authToken.isNullOrBlank()) {
+            loadUserData()
         }
     }
 
@@ -1027,8 +1084,9 @@ fun NailMindApp() {
 
     LaunchedEffect(Unit) {
         NailMindApiClient.setAuthTokenProvider { authToken }
+        runCatching { loadPublicCatalog() }
         if (!authToken.isNullOrBlank()) {
-            runCatching { bootstrapData() }
+            runCatching { loadUserData() }
                 .onFailure { resetToLogin() }
         }
     }
@@ -1050,7 +1108,7 @@ fun NailMindApp() {
         back()
     }
     val showHomeChrome = current is Screen.Tab && (current.tab == MainTab.Home || current.tab == MainTab.TryOn)
-    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner
+    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner || current is Screen.Xiaomei
     val styleDetailStyle = (current as? Screen.StyleDetail)?.let { screen ->
         styleItems.firstOrNull { it.id == screen.styleId } ?: styleItems.firstOrNull()
     }
@@ -1082,6 +1140,7 @@ fun NailMindApp() {
         is Screen.TryOnResult -> "试戴结果"
         Screen.TryOnHistory -> "试戴记录"
         Screen.DiyDesigner -> "DIY设计"
+        Screen.Xiaomei -> "小美"
         Screen.Favorites -> "我的收藏"
         Screen.BookingRecords -> "预约记录"
         is Screen.StoreDetail -> "门店详情"
@@ -1095,6 +1154,7 @@ fun NailMindApp() {
         else -> false
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         topBar = {
             if (isAuthenticated && !hideAppChrome) {
@@ -1155,7 +1215,7 @@ fun NailMindApp() {
                             TextButton(
                                 onClick = {
                                     if (isTryOn) {
-                                        showXiaomeiAssistant = true
+                                        go(Screen.Xiaomei)
                                     } else {
                                         currentTab = tab
                                         stack.clear()
@@ -1266,7 +1326,10 @@ fun NailMindApp() {
                             runCatching { repository.login(email = email, password = password) }
                                 .onSuccess {
                                     completeAuth(it)
-                                    runCatching { bootstrapData() }
+                                    runCatching {
+                                        loadPublicCatalog()
+                                        loadUserData()
+                                    }
                                         .onFailure { error -> authError = error.message ?: "初始化首页数据失败" }
                                 }
                                 .onFailure { error ->
@@ -1299,7 +1362,10 @@ fun NailMindApp() {
                             runCatching { repository.register(name = name.ifBlank { "新用户" }, email = email, password = password) }
                                 .onSuccess {
                                     completeAuth(it)
-                                    runCatching { bootstrapData() }
+                                    runCatching {
+                                        loadPublicCatalog()
+                                        loadUserData()
+                                    }
                                         .onFailure { error -> authError = error.message ?: "初始化首页数据失败" }
                                 }
                                 .onFailure { error ->
@@ -1340,6 +1406,17 @@ fun NailMindApp() {
                     MainTab.Styles -> StylesScreen(
                         styles = styleItems,
                         refreshing = pageRefreshing,
+                        selectedTabName = styleBrowseTabName,
+                        selectedOptionLabel = styleBrowseOptionLabel,
+                        sortMode = styleBrowseSortMode,
+                        query = styleBrowseQuery,
+                        onSelectedTabChange = { tab ->
+                            styleBrowseTabName = tab.name
+                            styleBrowseOptionLabel = tab.options().first().label
+                        },
+                        onSelectedOptionChange = { styleBrowseOptionLabel = it },
+                        onSortModeChange = { styleBrowseSortMode = it },
+                        onQueryChange = { styleBrowseQuery = it },
                         onRefresh = ::refreshPageData,
                         onStyleClick = { go(Screen.StyleDetail(it)) }
                     )
@@ -1433,6 +1510,31 @@ fun NailMindApp() {
                             Toast.makeText(context, "暂无可试戴款式", Toast.LENGTH_SHORT).show()
                         } else {
                             go(Screen.TryOnUpload(target))
+                        }
+                    }
+                )
+
+                Screen.Xiaomei -> XiaomeiAssistantSheet(
+                    repository = repository,
+                    input = xiaomeiInput,
+                    loading = xiaomeiLoading,
+                    messages = xiaomeiMessages,
+                    onInputChange = { xiaomeiInput = it },
+                    onLoadingChange = { xiaomeiLoading = it },
+                    onDismiss = ::back,
+                    onOpenDiy = { go(Screen.DiyDesigner) },
+                    onOpenStyles = { go(Screen.Tab(MainTab.Styles)) },
+                    onOpenFavorites = { go(Screen.Favorites) },
+                    onOpenBooking = { go(Screen.Tab(MainTab.Booking)) },
+                    onOpenTryOn = { styleId ->
+                        val targetStyleId = styleId.ifBlank { styleItems.firstOrNull()?.id.orEmpty() }
+                        if (targetStyleId.isNotBlank()) {
+                            go(Screen.TryOnUpload(targetStyleId))
+                        }
+                    },
+                    onOpenStyle = { styleId ->
+                        if (styleId.isNotBlank()) {
+                            go(Screen.StyleDetail(styleId))
                         }
                     }
                 )
@@ -1629,96 +1731,186 @@ fun NailMindApp() {
                 )
             }
         }
-        if (showXiaomeiAssistant) {
-            XiaomeiAssistantSheet(
-                onDismiss = { showXiaomeiAssistant = false },
-                onOpenDiy = {
-                    showXiaomeiAssistant = false
-                    go(Screen.DiyDesigner)
-                }
-            )
-        }
+    }
     }
 }
+
+private enum class XiaomeiChatRole {
+    User,
+    Assistant
+}
+
+private data class XiaomeiChatMessage(
+    val id: String = UUID.randomUUID().toString(),
+    val role: XiaomeiChatRole,
+    val text: String,
+    val response: MeimeiChatResponse? = null,
+    val isError: Boolean = false
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun XiaomeiAssistantSheet(
+    repository: NailMindRepository,
+    input: String,
+    loading: Boolean,
+    messages: SnapshotStateList<XiaomeiChatMessage>,
+    onInputChange: (String) -> Unit,
+    onLoadingChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
-    onOpenDiy: () -> Unit
+    onOpenDiy: () -> Unit,
+    onOpenStyles: () -> Unit,
+    onOpenFavorites: () -> Unit,
+    onOpenBooking: () -> Unit,
+    onOpenTryOn: (String) -> Unit,
+    onOpenStyle: (String) -> Unit
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coroutineScope = rememberCoroutineScope()
+    val chatListState = rememberLazyListState()
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.fillMaxHeight(),
-        sheetState = sheetState,
-        containerColor = Color.White,
-        shape = MaterialTheme.shapes.large,
-        dragHandle = null
+    fun openEntry(entryTarget: String?, styleId: String? = null) {
+        when (entryTarget) {
+            "diy" -> onOpenDiy()
+            "styles" -> onOpenStyles()
+            "favorites" -> onOpenFavorites()
+            "booking" -> onOpenBooking()
+            "tryon", "tryon_upload" -> onOpenTryOn(styleId.orEmpty())
+        }
+    }
+
+    fun ask(message: String) {
+        val content = message.trim()
+        if (content.isBlank() || loading) return
+        onInputChange("")
+        onLoadingChange(true)
+        messages.add(XiaomeiChatMessage(role = XiaomeiChatRole.User, text = content))
+        coroutineScope.launch {
+            runCatching { repository.meimeiChat(content) }
+                .onSuccess { result ->
+                    messages.add(
+                        XiaomeiChatMessage(
+                            role = XiaomeiChatRole.Assistant,
+                            text = result.toXiaomeiDisplayText(),
+                            response = result
+                        )
+                    )
+                    val directTarget = result.entry?.target
+                    if (result.recommendations.isEmpty() && directTarget in setOf("diy", "styles", "favorites", "booking")) {
+                        openEntry(directTarget)
+                    }
+                }
+                .onFailure { error ->
+                    messages.add(
+                        XiaomeiChatMessage(
+                            role = XiaomeiChatRole.Assistant,
+                            text = error.message ?: "小美暂时无法回答，请稍后再试",
+                            isError = true
+                        )
+                    )
+                }
+            onLoadingChange(false)
+        }
+    }
+
+    LaunchedEffect(messages.size, loading) {
+        val targetIndex = messages.size + if (loading) 1 else 0
+        if (targetIndex > 0) {
+            chatListState.scrollToItem(targetIndex)
+        }
+    }
+
+    BackHandler(onBack = onDismiss)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White)
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight()
-                .padding(start = 18.dp, top = 48.dp, end = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .statusBarsPadding()
+                .padding(start = 18.dp, top = 48.dp, end = 18.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                IconButton(onClick = onDismiss) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "关闭小美",
-                        modifier = Modifier.size(28.dp),
-                        tint = Color.Black
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "关闭小美",
+                            modifier = Modifier.size(28.dp),
+                            tint = Color.Black
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Image(
+                            painter = painterResource(id = R.drawable.bottom_nav_diy_icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(28.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                        Text("小美", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Text("×", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Image(
-                        painter = painterResource(id = R.drawable.bottom_nav_diy_icon),
-                        contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        contentScale = ContentScale.Fit
-                    )
-                    Text("小美", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+
+                LazyColumn(
+                    state = chatListState,
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    if (messages.isEmpty()) {
+                        item(key = "intro") {
+                            Text(
+                                text = "我是小美，选款搭配随时问我",
+                                fontSize = 26.sp,
+                                lineHeight = 34.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Black
+                            )
+                        }
+                        item(key = "prompts") {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                XiaomeiPromptChip("💅 根据我的手型和肤色推荐") { ask("根据我的手型和肤色推荐适合的甲型、色号和款式") }
+                                XiaomeiPromptChip("✨ 适合上班通勤的简约款") { ask("适合上班通勤的简约美甲，显白一点") }
+                                XiaomeiPromptChip("🌸 甜酷氛围感美甲推荐") { ask("推荐甜酷氛围感美甲") }
+                                XiaomeiPromptChip("🎨 我想自己 DIY 一款", onClick = onOpenDiy)
+                            }
+                        }
+                    }
+                    items(messages, key = { it.id }) { message ->
+                        XiaomeiChatBubble(
+                            message = message,
+                            onOpenStyle = onOpenStyle,
+                            onTryOn = onOpenTryOn
+                        )
+                    }
+                    if (loading) {
+                        item(key = "typing") {
+                            XiaomeiTypingBubble()
+                        }
+                    }
                 }
-                IconButton(onClick = onDismiss) {
-                    Text("—", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.Black)
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Text(
-                text = "我是小美，选款搭配随时问我",
-                fontSize = 26.sp,
-                lineHeight = 34.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.Black
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                XiaomeiPromptChip("💅 按肤色推荐显白美甲")
-                XiaomeiPromptChip("✨ 适合上班通勤的简约款")
-                XiaomeiPromptChip("🌸 甜酷氛围感美甲推荐")
-                XiaomeiPromptChip("🎨 我想自己 DIY 一款", onClick = onOpenDiy)
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                XiaomeiActionChip("深度思考", Icons.Rounded.AutoAwesome)
-                XiaomeiActionChip("找优惠", Icons.Rounded.Storefront)
-                XiaomeiActionChip("一键选款", Icons.Rounded.Star)
             }
 
             Surface(
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .imePadding()
                     .navigationBarsPadding(),
                 color = Color.White,
                 shape = MaterialTheme.shapes.extraLarge,
@@ -1728,28 +1920,170 @@ private fun XiaomeiAssistantSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 18.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "发消息或按住说话",
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = onInputChange,
                         modifier = Modifier.weight(1f),
-                        fontSize = 18.sp,
-                        color = Color(0xFF9B9699)
+                        placeholder = { Text("发消息或按住说话") },
+                        singleLine = true,
+                        enabled = !loading,
+                        shape = MaterialTheme.shapes.extraLarge
                     )
                     Surface(
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clickable(enabled = !loading && input.isNotBlank()) { ask(input) },
                         shape = MaterialTheme.shapes.extraLarge,
-                        border = androidx.compose.foundation.BorderStroke(2.dp, Color.Black),
-                        color = Color.White
+                        color = if (!loading && input.isNotBlank()) RoseAccent else Color.White,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (!loading && input.isNotBlank()) RoseAccent else Color.Black)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Text("•))", fontSize = 14.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                            if (loading) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = RoseAccent)
+                            } else {
+                                Text("•))", fontSize = 14.sp, color = if (input.isNotBlank()) Color.White else Color.Black, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun XiaomeiChatBubble(
+    message: XiaomeiChatMessage,
+    onOpenStyle: (String) -> Unit,
+    onTryOn: (String) -> Unit
+) {
+    val isUser = message.role == XiaomeiChatRole.User
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(if (isUser) 0.78f else 0.92f),
+            color = when {
+                message.isError -> Color(0xFFFFF1F1)
+                isUser -> RoseAccent
+                else -> Color(0xFFFFF7FA)
+            },
+            shape = RoundedCornerShape(
+                topStart = 22.dp,
+                topEnd = 22.dp,
+                bottomStart = if (isUser) 22.dp else 6.dp,
+                bottomEnd = if (isUser) 6.dp else 22.dp
+            ),
+            border = if (isUser) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2D9E3))
+        ) {
+            Text(
+                text = message.text,
+                modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
+                fontSize = 16.sp,
+                lineHeight = 23.sp,
+                color = if (isUser) Color.White else if (message.isError) MaterialTheme.colorScheme.error else Color(0xFF2B2528)
+            )
+        }
+        message.response?.let { result ->
+            if (result.recommendations.isNotEmpty()) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    items(result.recommendations, key = { it.id }) { item ->
+                        XiaomeiRecommendationCard(
+                            item = item,
+                            onOpenStyle = { onOpenStyle(item.id) },
+                            onTryOn = { onTryOn(item.id) }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun MeimeiChatResponse.toXiaomeiDisplayText(): String {
+    if (handAnalysis?.hasHand == false) {
+        return "这张没看清手部，换一张手指和指甲完整露出的照片。"
+    }
+    if (recommendations.isNotEmpty()) {
+        return "我挑了几款更适合你的，先看这几款。"
+    }
+    return when (entry?.target) {
+        "diy" -> "可以。"
+        "styles" -> "可以。"
+        "favorites" -> "可以。"
+        "booking" -> "可以。"
+        "tryon", "tryon_upload" -> "先选一款，再上传手部照片。"
+        else -> reply
+            .replace("入口", "")
+            .replace("根据你的手型和肤色", "按你的需求")
+            .replace("根据手型和肤色", "按你的需求")
+            .trim()
+            .ifBlank { "可以。" }
+    }
+}
+
+@Composable
+private fun XiaomeiTypingBubble() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(0.62f),
+        color = Color(0xFFFFF7FA),
+        shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = 6.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2D9E3))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = RoseAccent)
+            Text("小美正在分析...", fontSize = 15.sp, color = Color(0xFF6F5962))
+        }
+    }
+}
+
+@Composable
+private fun XiaomeiRecommendationCard(
+    item: MeimeiRecommendationDto,
+    onOpenStyle: () -> Unit,
+    onTryOn: () -> Unit
+) {
+    Surface(
+        modifier = Modifier.width(210.dp),
+        color = Color.White,
+        shape = RoundedCornerShape(22.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFECE3E7)),
+        shadowElevation = 2.dp
+    ) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SubcomposeAsyncImage(
+                model = item.imageUrl,
+                contentDescription = item.name,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(112.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFF7EEF2)),
+                contentScale = ContentScale.Crop
+            ) {
+                when (painter.state) {
+                    is AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
+                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = RoseAccent)
+                    }
+                }
+            }
+            Text(item.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(item.reason, fontSize = 12.sp, lineHeight = 17.sp, color = Color(0xFF7B7176), maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenStyle, modifier = Modifier.weight(1f)) { Text("详情", fontSize = 12.sp) }
+                Button(onClick = onTryOn, modifier = Modifier.weight(1f)) { Text("试戴", fontSize = 12.sp) }
+            }
         }
     }
 }
@@ -2543,25 +2877,33 @@ private fun RankingRow(rank: Int, style: NailStyle, onClick: () -> Unit) {
 private fun StylesScreen(
     styles: List<NailStyle>,
     refreshing: Boolean,
+    selectedTabName: String,
+    selectedOptionLabel: String,
+    sortMode: String,
+    query: String,
+    onSelectedTabChange: (StyleBrowseTab) -> Unit,
+    onSelectedOptionChange: (String) -> Unit,
+    onSortModeChange: (String) -> Unit,
+    onQueryChange: (String) -> Unit,
     onRefresh: () -> Unit,
     onStyleClick: (String) -> Unit
 ) {
-    var selectedTab by remember { mutableStateOf(StyleBrowseTab.NailShape) }
-    var selectedOption by remember { mutableStateOf(nailShapeBrowseOptions.first()) }
-    var sortMode by remember { mutableStateOf("热度高") }
-    var query by remember { mutableStateOf("") }
+    val selectedTab = StyleBrowseTab.entries.firstOrNull { it.name == selectedTabName } ?: StyleBrowseTab.NailShape
     val options = selectedTab.options()
+    val selectedOption = options.firstOrNull { it.label == selectedOptionLabel } ?: options.first()
 
-    LaunchedEffect(selectedTab) {
-        selectedOption = selectedTab.options().first()
+    LaunchedEffect(selectedTabName, selectedOptionLabel) {
+        if (options.none { it.label == selectedOptionLabel }) {
+            onSelectedOptionChange(options.first().label)
+        }
     }
 
     val queryMatchedStyles = styles.filter { it.matchesStyleQuery(query) }
     val categoryMatchedStyles = queryMatchedStyles.filter { it.matchesBrowseOption(selectedTab, selectedOption) }
     val filteredStyles = when (sortMode) {
-        "收藏多" -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }.sortedByDescending { it.tags.size }
-        "新上架" -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }.asReversed()
-        else -> categoryMatchedStyles.ifEmpty { queryMatchedStyles }
+        "收藏多" -> categoryMatchedStyles.sortedByDescending { it.tags.size }
+        "新上架" -> categoryMatchedStyles.asReversed()
+        else -> categoryMatchedStyles
     }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
@@ -2582,7 +2924,7 @@ private fun StylesScreen(
             ) {
                 StyleSearchField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = onQueryChange,
                     modifier = Modifier
                         .weight(1f)
                         .height(36.dp)
@@ -2592,8 +2934,8 @@ private fun StylesScreen(
                         .width(86.dp)
                         .height(36.dp)
                         .clickable {
-                            query = ""
-                            selectedOption = options.first()
+                            onQueryChange("")
+                            onSelectedOptionChange(options.first().label)
                         },
                     shape = RoundedCornerShape(16.dp),
                     color = Color.White,
@@ -2622,7 +2964,7 @@ private fun StylesScreen(
                         modifier = Modifier
                             .weight(1f)
                             .height(32.dp)
-                            .clickable { selectedTab = tab },
+                            .clickable { onSelectedTabChange(tab) },
                         color = if (selectedTab == tab) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.White
                     ) {
                         Box(
@@ -2660,13 +3002,13 @@ private fun StylesScreen(
                     contentPadding = PaddingValues(vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(options) { option ->
-                        val selected = selectedOption == option
+                    items(options, key = { it.label }) { option ->
+                        val selected = selectedOption.label == option.label
                         Surface(
                             modifier = Modifier
                                 .padding(horizontal = 8.dp)
                                 .fillMaxWidth()
-                                .clickable { selectedOption = option },
+                                .clickable { onSelectedOptionChange(option.label) },
                             color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent,
                             shape = MaterialTheme.shapes.small
                         ) {
@@ -2699,7 +3041,7 @@ private fun StylesScreen(
                             StyleSortChip(
                                 text = mode,
                                 selected = sortMode == mode,
-                                onClick = { sortMode = mode }
+                                onClick = { onSortModeChange(mode) }
                             )
                         }
                     }
@@ -2714,7 +3056,7 @@ private fun StylesScreen(
                                 EmptyState("没有匹配款式", "换个关键词，或切换到其他${selectedTab.title}小类。")
                             }
                         } else {
-                            items(filteredStyles.chunked(2)) { rowStyles ->
+                            items(filteredStyles.chunked(2), key = { rowStyles -> rowStyles.joinToString("|") { it.id } }) { rowStyles ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2880,11 +3222,19 @@ private fun NailStyle.matchesStyleQuery(query: String): Boolean {
 }
 
 private fun NailStyle.matchesBrowseOption(tab: StyleBrowseTab, option: StyleBrowseOption): Boolean {
-    val corpus = searchCorpus()
-    if (option.keywords.any { corpus.contains(it, ignoreCase = true) }) return true
-    val sequence = id.substringAfterLast("-").toIntOrNull() ?: return true
-    val options = tab.options()
-    return options.indexOf(option).takeIf { it >= 0 } == ((sequence - 1).floorMod(options.size))
+    val normalizedKeywords = option.keywords.map { it.trim() }.filter { it.isNotBlank() }
+    val groupedTags = when (tab) {
+        StyleBrowseTab.NailShape -> listOf(nailType) + tagGroups.nailShapes
+        StyleBrowseTab.Effect -> tagGroups.effects.ifEmpty { tags }
+        StyleBrowseTab.Vibe -> tagGroups.vibes.ifEmpty { tags }
+    }.map { it.trim() }.filter { it.isNotBlank() }
+    return when (tab) {
+        StyleBrowseTab.NailShape,
+        StyleBrowseTab.Effect,
+        StyleBrowseTab.Vibe -> normalizedKeywords.any { keyword ->
+            groupedTags.any { tag -> tag.equals(keyword, ignoreCase = true) }
+        }
+    }
 }
 
 private fun Int.floorMod(modulus: Int): Int = ((this % modulus) + modulus) % modulus

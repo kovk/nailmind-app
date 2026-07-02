@@ -54,15 +54,23 @@ data class HomeResponse(
     val hot: List<StyleDto>
 )
 
+data class StyleTagGroupsDto(
+    val nailShapes: List<String> = emptyList(),
+    val vibes: List<String> = emptyList(),
+    val effects: List<String> = emptyList(),
+    val scenes: List<String> = emptyList()
+)
+
 data class StyleDto(
     val id: String,
     val name: String,
-    val vibe: String,
-    val price: String,
-    val nailType: String,
-    val skinTone: String,
-    val tags: List<String>,
-    val colors: List<String>,
+    val vibe: String = "",
+    val price: String = "",
+    val nailType: String = "",
+    val skinTone: String = "",
+    val tags: List<String> = emptyList(),
+    val tagGroups: StyleTagGroupsDto? = null,
+    val colors: List<String> = emptyList(),
     val imageUrl: String? = null,
     val tryOnStyleId: Int? = null
 )
@@ -74,6 +82,57 @@ data class StylesResponse(
 data class SearchResponse(
     val query: String,
     val items: List<StyleDto>
+)
+
+data class MeimeiChatRequest(
+    val message: String,
+    val handImageUrl: String? = null,
+    val handImageKey: String? = null
+)
+
+data class MeimeiEntryDto(
+    val type: String = "",
+    val target: String = "",
+    val label: String = ""
+)
+
+data class MeimeiHandAnalysisDto(
+    val hasHand: Boolean = false,
+    val skinTone: String = "",
+    val handShape: String = "",
+    val recommendedShapes: List<String> = emptyList(),
+    val recommendedColors: List<String> = emptyList(),
+    val reason: String = "",
+    val confidence: Double = 0.0
+)
+
+data class MeimeiRecommendationDto(
+    val id: String,
+    val name: String,
+    val imageUrl: String? = null,
+    val reason: String = "",
+    val entry: MeimeiEntryDto? = null,
+    val tags: List<String> = emptyList(),
+    val nailType: String = "",
+    val colorTone: String? = null
+)
+
+data class MeimeiChatResponse(
+    val reply: String,
+    val intent: String,
+    val entry: MeimeiEntryDto? = null,
+    val handAnalysis: MeimeiHandAnalysisDto? = null,
+    val recommendedShapes: List<String> = emptyList(),
+    val recommendedColors: List<String> = emptyList(),
+    val recommendations: List<MeimeiRecommendationDto> = emptyList()
+)
+
+fun MeimeiRecommendationDto.normalized(): MeimeiRecommendationDto = copy(
+    imageUrl = AppConfig.normalizeMediaUrl(imageUrl)
+)
+
+fun MeimeiChatResponse.normalized(): MeimeiChatResponse = copy(
+    recommendations = recommendations.map { it.normalized() }
 )
 
 data class StyleDetailResponse(
