@@ -190,6 +190,7 @@ private sealed interface Screen {
     data object Xiaomei : Screen
     data object Favorites : Screen
     data object BookingRecords : Screen
+    data object Reviews : Screen
     data class StoreDetail(val storeId: String, val styleId: String? = null) : Screen
     data class BookingForm(val storeId: String, val styleId: String) : Screen
     data class BookingConfirm(val bookingId: String) : Screen
@@ -292,6 +293,14 @@ private data class BookingRecord(
     val slot: String
 )
 
+private data class ReviewItem(
+    val id: String,
+    val storeName: String,
+    val styleName: String,
+    val slot: String,
+    val rating: Int? = null,
+    val comment: String = ""
+)
 private data class UserSettings(
     val stylePreferences: String,
     val notifications: String,
@@ -1143,6 +1152,7 @@ fun NailMindApp() {
         Screen.Xiaomei -> "小美"
         Screen.Favorites -> "我的收藏"
         Screen.BookingRecords -> "预约记录"
+        Screen.Reviews -> "我的评价"
         is Screen.StoreDetail -> "门店详情"
         is Screen.BookingForm -> "填写预约"
         is Screen.BookingConfirm -> "确认预约"
@@ -1449,6 +1459,7 @@ fun NailMindApp() {
                         onFavorites = { go(Screen.Favorites) },
                         onTryOnHistory = { go(Screen.TryOnHistory) },
                         onRecords = { go(Screen.BookingRecords) },
+                        onReviews = { go(Screen.Reviews) },
                         onSettings = { go(Screen.Settings) }
                     )
                 }
@@ -1632,6 +1643,8 @@ fun NailMindApp() {
                     refreshing = pageRefreshing,
                     onRefresh = ::refreshPageData
                 )
+
+                Screen.Reviews -> ReviewsScreen(records = bookingRecords)
 
                 is Screen.StoreDetail -> {
                     val store = storeItems.firstOrNull { it.id == screen.storeId } ?: return@AnimatedContent
@@ -3655,7 +3668,7 @@ private fun DiyTopHeader(title: String, onBackHome: () -> Unit, onHelp: () -> Un
 
 @Composable
 private fun DiyProgress(step: Int) {
-    val labels = listOf("选择甲片", "整体设计", "单指编辑", "完成设计", "试戴效果")
+    val labels = listOf("选择甲片", "整体设计", "单指编辑", "完成设计")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -3799,6 +3812,7 @@ private fun DiyShapeStep(
                 enabled = selectedShape != null,
                 onClick = onNext
             )
+            Spacer(Modifier.height(42.dp))
         }
     }
 }
@@ -4527,8 +4541,8 @@ private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 12.dp, top = 0.dp, end = 12.dp, bottom = 112.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                contentPadding = PaddingValues(start = 18.dp, top = 12.dp, end = 18.dp, bottom = 112.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 if (filteredStores.isEmpty()) {
                     item { EmptyState("暂无门店", "调整筛选后再试。") }
@@ -4689,6 +4703,7 @@ private fun ProfileScreen(
     onFavorites: () -> Unit,
     onTryOnHistory: () -> Unit,
     onRecords: () -> Unit,
+    onReviews: () -> Unit,
     onSettings: () -> Unit
 ) {
     val context = LocalContext.current
@@ -4758,9 +4773,7 @@ private fun ProfileScreen(
                     Text("我的预约", fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     Row(horizontalArrangement = Arrangement.SpaceAround, modifier = Modifier.fillMaxWidth()) {
                         ProfileActionIcon("订单", imageRes = R.drawable.profile_booking_order, onClick = onRecords)
-                        ProfileActionIcon("评价", imageRes = R.drawable.profile_booking_review) {
-                            Toast.makeText(context, "评价功能待接入", Toast.LENGTH_SHORT).show()
-                        }
+                        ProfileActionIcon("评价", imageRes = R.drawable.profile_booking_review, onClick = onReviews)
                         ProfileActionIcon("售后", imageRes = R.drawable.profile_booking_after_sale) {
                             Toast.makeText(context, "售后功能待接入", Toast.LENGTH_SHORT).show()
                         }
@@ -5765,6 +5778,202 @@ private fun BookingRecordsScreen(
 }
 
 @Composable
+private fun ReviewsScreen(records: List<BookingRecord>) {
+    var selectedTab by remember { mutableStateOf("待评价") }
+    val pendingReviews = remember(records) { buildPendingReviewItems(records) }
+    val finishedReviews = remember(records) { buildFinishedReviewItems(records) }
+    val currentItems = if (selectedTab == "待评价") pendingReviews else finishedReviews
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 20.dp, top = 16.dp, end = 20.dp, bottom = 112.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            ReviewTabBar(
+                selected = selectedTab,
+                pendingCount = pendingReviews.size,
+                finishedCount = finishedReviews.size,
+                onSelect = { selectedTab = it }
+            )
+        }
+        if (currentItems.isEmpty()) {
+            item {
+                EmptyState(
+                    title = if (selectedTab == "待评价") "暂无待评价订单" else "暂无已评价内容",
+                    subtitle = if (selectedTab == "待评价") "完成到店后，这里会出现可评价的美甲订单。" else "评价完成后，会沉淀在这里方便回看。"
+                )
+            }
+        } else {
+            items(currentItems) { item ->
+                UserReviewCard(item = item, pending = selectedTab == "待评价")
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewTabBar(selected: String, pendingCount: Int, finishedCount: Int, onSelect: (String) -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.background,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f))
+    ) {
+        Row(Modifier.padding(3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ReviewTab(
+                title = "待评价",
+                count = pendingCount,
+                selected = selected == "待评价",
+                modifier = Modifier.weight(1f),
+                onClick = { onSelect("待评价") }
+            )
+            ReviewTab(
+                title = "已评价",
+                count = finishedCount,
+                selected = selected == "已评价",
+                modifier = Modifier.weight(1f),
+                onClick = { onSelect("已评价") }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReviewTab(title: String, count: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier
+            .height(44.dp)
+            .clickable(onClick = onClick),
+        color = if (selected) Color.White else MaterialTheme.colorScheme.background,
+        shape = RoundedCornerShape(6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                title,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                fontSize = 14.sp,
+                lineHeight = 16.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                count.toString(),
+                color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.72f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.42f),
+                fontSize = 12.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
+private fun UserReviewCard(item: ReviewItem, pending: Boolean) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f))
+    ) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                GradientThumb(
+                    style = NailStyle(
+                        id = item.id,
+                        name = item.styleName,
+                        vibe = item.storeName,
+                        price = "",
+                        nailType = "",
+                        skinTone = "",
+                        colors = listOf(RoseAccent.copy(alpha = 0.82f), Color(0xFFF7D8E4)),
+                        tags = emptyList()
+                    ),
+                    modifier = Modifier.size(58.dp)
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(item.storeName, fontWeight = FontWeight.Bold, fontSize = 15.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(item.styleName, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(item.slot, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1)
+                }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (pending) RoseTint else MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                ) {
+                    Text(
+                        if (pending) "待评" else "已评",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
+                    )
+                }
+            }
+            if (pending) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    repeat(5) {
+                        Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f), modifier = Modifier.size(17.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Button(
+                        onClick = {},
+                        modifier = Modifier.height(34.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
+                    ) {
+                        Text("去评价", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    repeat(5) { index ->
+                        Icon(
+                            Icons.Rounded.Star,
+                            contentDescription = null,
+                            tint = if (index < (item.rating ?: 5)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Text(item.comment, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+private fun buildPendingReviewItems(records: List<BookingRecord>): List<ReviewItem> {
+    val completed = records.filter { it.status.contains("完成") || it.status.contains("completed", ignoreCase = true) }
+    val source = completed.ifEmpty { records.take(2) }
+    return source.mapIndexed { index, record ->
+        ReviewItem(
+            id = "pending-${record.id}-$index",
+            storeName = record.storeName,
+            styleName = record.styleName,
+            slot = record.slot
+        )
+    }
+}
+
+private fun buildFinishedReviewItems(records: List<BookingRecord>): List<ReviewItem> {
+    val source = records.drop(2).take(2)
+    return source.mapIndexed { index, record ->
+        ReviewItem(
+            id = "finished-${record.id}-$index",
+            storeName = record.storeName,
+            styleName = record.styleName,
+            slot = record.slot,
+            rating = if (index % 2 == 0) 5 else 4,
+            comment = if (index % 2 == 0) "款式还原度高，修型很细致" else "门店服务很耐心，下次还会约"
+        )
+    }
+}
+@Composable
 private fun SettingsScreen(settings: UserSettings, onLogout: () -> Unit) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -6031,105 +6240,113 @@ private fun StoreCard(store: Store, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(142.dp)
+            .height(138.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = null
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
     ) {
         Row(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             StoreCover(
                 store = store,
                 modifier = Modifier
-                    .width(126.dp)
+                    .width(106.dp)
                     .fillMaxHeight(),
-                label = "店铺头像",
-                showStatus = false
+                label = store.area.ifBlank { store.name.take(4) },
+                showStatus = true
             )
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxHeight()
-                    .background(Color.White)
-                    .padding(start = 16.dp, top = 12.dp, end = 14.dp, bottom = 12.dp),
+                    .fillMaxHeight(),
                 horizontalAlignment = Alignment.Start,
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(
-                    store.name,
-                    modifier = Modifier.fillMaxWidth(),
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    lineHeight = 19.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Start
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "${store.statusText}  ${store.openHours}",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.68f),
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
+                        store.name,
+                        modifier = Modifier.weight(1f),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp,
+                        lineHeight = 19.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Start
+                    )
+                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
+                            Text(store.score, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    StoreMetaPill(text = store.statusText, highlight = true)
+                    StoreMetaPill(text = store.distance)
+                    StoreMetaPill(text = averagePriceText(store))
+                }
+
+                Text(
+                    store.address.ifBlank { store.area },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    textAlign = TextAlign.Start,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Surface(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp), color = RoseTint) {
+                    Text(
+                        if (store.nearestSlot.isBlank()) "最近可约时间待确认" else "最近可约 ${store.nearestSlot}",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 10.sp,
+                        lineHeight = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Text(
-                        text = averagePriceText(store),
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f),
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = store.distance,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f),
-                        fontSize = 12.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
-                }
-                Text(
-                    store.address.ifBlank { store.area },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    textAlign = TextAlign.Start,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    if (store.nearestSlot.isBlank()) "最近可约" else "最近可约：${store.nearestSlot}",
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    textAlign = TextAlign.Start,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
         }
     }
 }
 
+@Composable
+private fun StoreMetaPill(text: String, highlight: Boolean = false) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (highlight) Color(0xFFEFF7EF) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+            color = if (highlight) Color(0xFF3E7A48) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+    }
+}
 @Composable
 private fun StoreCover(
     store: Store,
@@ -6139,36 +6356,58 @@ private fun StoreCover(
 ) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(0.dp))
-            .background(Brush.linearGradient(listOf(store.coverTone.copy(alpha = 0.76f), store.coverTone.copy(alpha = 0.46f))))
-            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.08f), RoundedCornerShape(0.dp)),
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        store.coverTone.copy(alpha = 0.92f),
+                        store.coverTone.copy(alpha = 0.56f),
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.42f)
+                    )
+                )
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.48f), RoundedCornerShape(14.dp)),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Icon(Icons.Rounded.Storefront, contentDescription = null, tint = Color.White.copy(alpha = 0.82f), modifier = Modifier.size(if (showStatus) 24.dp else 22.dp))
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            repeat(5) { index ->
+                val x = size.width * (0.18f + index * 0.15f)
+                drawLine(
+                    color = Color.White.copy(alpha = 0.14f + index * 0.025f),
+                    start = Offset(x, size.height * 0.18f),
+                    end = Offset(x + size.width * 0.08f, size.height * 0.82f),
+                    strokeWidth = size.minDimension / 12f,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Icon(Icons.Rounded.Storefront, contentDescription = null, tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(if (showStatus) 24.dp else 22.dp))
             Text(
                 label,
                 color = Color.White,
                 fontSize = if (showStatus) 13.sp else 18.sp,
-                lineHeight = if (showStatus) 14.sp else 20.sp,
-                fontWeight = FontWeight.Medium,
+                lineHeight = if (showStatus) 15.sp else 20.sp,
+                fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                maxLines = 2
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
             if (showStatus) {
-                Surface(color = Color.Black.copy(alpha = 0.2f), shape = MaterialTheme.shapes.small) {
+                Surface(color = Color.Black.copy(alpha = 0.22f), shape = RoundedCornerShape(10.dp)) {
                     Text(
-                        store.statusText,
-                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                        store.couponText,
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
                         color = Color.White,
-                        fontSize = 10.sp
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
         }
     }
 }
-
 @Composable
 private fun TagRow(tags: List<String>) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
