@@ -9,7 +9,7 @@ Jetpack Compose 客户端，当前包含：
 
 ## 打开方式
 
-1. 用 Android Studio 打开目录：`/Users/kongzhitong/Documents/美甲/client/android`
+1. 用 Android Studio 打开目录：`/Users/kongzhitong/Documents/美甲/app/android`
 2. 等待 Gradle Sync 完成
 3. 运行 `app` 模块到模拟器或真机
 
@@ -18,7 +18,7 @@ Jetpack Compose 客户端，当前包含：
 复制一份本地配置模板：
 
 ```bash
-cd /Users/kongzhitong/Documents/美甲/client/android
+cd /Users/kongzhitong/Documents/美甲/app/android
 cp local.properties.example local.properties
 ```
 

@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -154,9 +155,14 @@ import com.nailmind.app.data.api.TryOnHistoryItemDto
 import com.nailmind.app.data.config.AppConfig
 import com.nailmind.app.ui.theme.RoseAccent
 import com.nailmind.app.ui.theme.RoseTint
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1208,15 +1214,15 @@ fun NailMindApp() {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .navigationBarsPadding()
                             .height(62.dp)
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                            .padding(horizontal = 8.dp)
+                            .padding(top = 3.dp, bottom = 3.dp),
                         verticalAlignment = Alignment.Bottom
                     ) {
                         MainTab.entries.forEach { tab ->
@@ -1225,6 +1231,8 @@ fun NailMindApp() {
                             TextButton(
                                 onClick = {
                                     if (isTryOn) {
+                                        xiaomeiInput = ""
+                                        xiaomeiMessages.clear()
                                         go(Screen.Xiaomei)
                                     } else {
                                         currentTab = tab
@@ -1272,12 +1280,14 @@ fun NailMindApp() {
                 Surface(
                     color = MaterialTheme.colorScheme.surface,
                     shadowElevation = 8.dp,
-                    modifier = Modifier.navigationBarsPadding()
+                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp)
+                            .padding(top = 10.dp, bottom = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -1757,9 +1767,113 @@ private data class XiaomeiChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val role: XiaomeiChatRole,
     val text: String,
+    val imagePath: String? = null,
     val response: MeimeiChatResponse? = null,
     val isError: Boolean = false
 )
+
+private data class XiaomeiChatSession(
+    val id: String,
+    val title: String,
+    val updatedAt: Long,
+    val messages: List<XiaomeiChatMessage>
+)
+
+private const val XiaomeiHistoryPreference = "xiaomei_chat_history_v1"
+private const val XiaomeiHistoryRetentionMs = 3L * 24L * 60L * 60L * 1000L
+
+private fun loadXiaomeiHistory(context: Context): List<XiaomeiChatSession> {
+    val raw = context.getSharedPreferences(AppConfig.preferencesName, Context.MODE_PRIVATE)
+        .getString(XiaomeiHistoryPreference, "[]")
+        .orEmpty()
+    return runCatching {
+        val now = System.currentTimeMillis()
+        val array = JSONArray(raw)
+        buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val updatedAt = item.optLong("updatedAt", 0L)
+                if (updatedAt <= 0L || now - updatedAt > XiaomeiHistoryRetentionMs) continue
+                val messageArray = item.optJSONArray("messages") ?: JSONArray()
+                val messages = buildList {
+                    for (messageIndex in 0 until messageArray.length()) {
+                        val message = messageArray.optJSONObject(messageIndex) ?: continue
+                        add(
+                            XiaomeiChatMessage(
+                                id = message.optString("id", UUID.randomUUID().toString()),
+                                role = if (message.optString("role") == "assistant") XiaomeiChatRole.Assistant else XiaomeiChatRole.User,
+                                text = message.optString("text"),
+                                imagePath = message.optString("imagePath").ifBlank { null },
+                                isError = message.optBoolean("isError", false)
+                            )
+                        )
+                    }
+                }
+                if (messages.isNotEmpty()) {
+                    add(
+                        XiaomeiChatSession(
+                            id = item.optString("id", updatedAt.toString()),
+                            title = item.optString("title").ifBlank { "小美咨询" },
+                            updatedAt = updatedAt,
+                            messages = messages
+                        )
+                    )
+                }
+            }
+        }.sortedByDescending { it.updatedAt }
+    }.getOrElse { emptyList() }
+}
+
+private fun saveXiaomeiSession(context: Context, messages: List<XiaomeiChatMessage>) {
+    val storableMessages = messages.filter { it.text.isNotBlank() || !it.imagePath.isNullOrBlank() }
+    if (storableMessages.isEmpty()) return
+    val firstUser = storableMessages.firstOrNull { it.role == XiaomeiChatRole.User }
+    val title = firstUser?.text?.trim()
+        ?.take(18)
+        ?.ifBlank { null }
+        ?: if (!firstUser?.imagePath.isNullOrBlank()) "手部照片推荐" else "小美咨询"
+    val now = System.currentTimeMillis()
+    val existing = loadXiaomeiHistory(context)
+    val session = XiaomeiChatSession(
+        id = now.toString(),
+        title = title,
+        updatedAt = now,
+        messages = storableMessages.map { it.copy(response = null) }
+    )
+    val array = JSONArray()
+    (listOf(session) + existing)
+        .filter { now - it.updatedAt <= XiaomeiHistoryRetentionMs }
+        .distinctBy { it.id }
+        .take(30)
+        .forEach { item ->
+            val messageArray = JSONArray()
+            item.messages.forEach { message ->
+                messageArray.put(
+                    JSONObject()
+                        .put("id", message.id)
+                        .put("role", if (message.role == XiaomeiChatRole.Assistant) "assistant" else "user")
+                        .put("text", message.text)
+                        .put("imagePath", message.imagePath ?: "")
+                        .put("isError", message.isError)
+                )
+            }
+            array.put(
+                JSONObject()
+                    .put("id", item.id)
+                    .put("title", item.title)
+                    .put("updatedAt", item.updatedAt)
+                    .put("messages", messageArray)
+            )
+        }
+    context.getSharedPreferences(AppConfig.preferencesName, Context.MODE_PRIVATE)
+        .edit()
+        .putString(XiaomeiHistoryPreference, array.toString())
+        .apply()
+}
+
+private fun formatXiaomeiHistoryTime(updatedAt: Long): String {
+    return SimpleDateFormat("MM-dd HH:mm", Locale.CHINA).format(Date(updatedAt))
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1778,8 +1892,12 @@ private fun XiaomeiAssistantSheet(
     onOpenTryOn: (String) -> Unit,
     onOpenStyle: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val chatListState = rememberLazyListState()
+    var pendingImageFile by remember { mutableStateOf<File?>(null) }
+    var showHistory by remember { mutableStateOf(false) }
+    var historySessions by remember { mutableStateOf(loadXiaomeiHistory(context)) }
 
     fun openEntry(entryTarget: String?, styleId: String? = null) {
         when (entryTarget) {
@@ -1791,38 +1909,82 @@ private fun XiaomeiAssistantSheet(
         }
     }
 
-    fun ask(message: String) {
-        val content = message.trim()
-        if (content.isBlank() || loading) return
+    fun closeXiaomei() {
+        saveXiaomeiSession(context, messages)
+        historySessions = loadXiaomeiHistory(context)
+        messages.clear()
+        pendingImageFile = null
         onInputChange("")
+        onDismiss()
+    }
+
+    fun addAssistantResponse(result: MeimeiChatResponse) {
+        messages.add(
+            XiaomeiChatMessage(
+                role = XiaomeiChatRole.Assistant,
+                text = result.toXiaomeiDisplayText(),
+                response = result
+            )
+        )
+        val directTarget = result.entry?.target
+        if (result.recommendations.isEmpty() && directTarget in setOf("diy", "styles", "favorites", "booking")) {
+            openEntry(directTarget)
+        }
+    }
+
+    fun sendMessage(rawText: String, imageFile: File?) {
+        val content = rawText.trim()
+        if ((content.isBlank() && imageFile == null) || loading) return
+        onInputChange("")
+        pendingImageFile = null
         onLoadingChange(true)
-        messages.add(XiaomeiChatMessage(role = XiaomeiChatRole.User, text = content))
+        val displayText = content.ifBlank { "帮我看看这张手部照片" }
+        messages.add(
+            XiaomeiChatMessage(
+                role = XiaomeiChatRole.User,
+                text = displayText,
+                imagePath = imageFile?.absolutePath
+            )
+        )
         coroutineScope.launch {
-            runCatching { repository.meimeiChat(content) }
-                .onSuccess { result ->
-                    messages.add(
-                        XiaomeiChatMessage(
-                            role = XiaomeiChatRole.Assistant,
-                            text = result.toXiaomeiDisplayText(),
-                            response = result
-                        )
+            runCatching {
+                if (imageFile != null) {
+                    val upload = repository.uploadHandImage(imageFile)
+                    repository.meimeiChat(
+                        message = content.ifBlank { "根据这张手部照片推荐适合的甲型、色号和款式" },
+                        handImageUrl = upload.image_url,
+                        handImageKey = upload.hand_id
                     )
-                    val directTarget = result.entry?.target
-                    if (result.recommendations.isEmpty() && directTarget in setOf("diy", "styles", "favorites", "booking")) {
-                        openEntry(directTarget)
-                    }
+                } else {
+                    repository.meimeiChat(content)
                 }
+            }.onSuccess(::addAssistantResponse)
                 .onFailure { error ->
                     messages.add(
                         XiaomeiChatMessage(
                             role = XiaomeiChatRole.Assistant,
-                            text = error.message ?: "小美暂时无法回答，请稍后再试",
+                            text = error.message ?: "小美暂时没处理好，换个说法或重新发一次照片。",
                             isError = true
                         )
                     )
                 }
             onLoadingChange(false)
         }
+    }
+
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            val file = copyUriToCache(context, uri)
+            if (file != null) {
+                pendingImageFile = file
+            } else {
+                Toast.makeText(context, "读取图片失败，请重试", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun openImagePicker() {
+        imagePickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     LaunchedEffect(messages.size, loading) {
@@ -1832,12 +1994,22 @@ private fun XiaomeiAssistantSheet(
         }
     }
 
-    BackHandler(onBack = onDismiss)
+    BackHandler(onBack = ::closeXiaomei)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        Color(0xFFFFDDED),
+                        Color(0xFFFFF4F8),
+                        Color(0xFFF8FAE9)
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(900f, 1300f)
+                )
+            )
     ) {
         Box(
             modifier = Modifier
@@ -1857,51 +2029,63 @@ private fun XiaomeiAssistantSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.ArrowBack,
-                            contentDescription = "关闭小美",
-                            modifier = Modifier.size(28.dp),
-                            tint = Color.Black
-                        )
+                    Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                        IconButton(onClick = ::closeXiaomei) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = "关闭小美",
+                                modifier = Modifier.size(28.dp),
+                                tint = Color.Black
+                            )
+                        }
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
                         Image(
                             painter = painterResource(id = R.drawable.bottom_nav_diy_icon),
                             contentDescription = null,
                             modifier = Modifier.size(28.dp),
                             contentScale = ContentScale.Fit
                         )
+                        Spacer(Modifier.width(8.dp))
                         Text("小美", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.Black)
                     }
-                    IconButton(onClick = onDismiss) {
-                        Text("×", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                historySessions = loadXiaomeiHistory(context)
+                                showHistory = true
+                            },
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                        ) {
+                            Text("历史", fontSize = 14.sp, color = Color(0xFF8D6E7A))
+                        }
+                        IconButton(onClick = ::closeXiaomei) {
+                            Text("×", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                        }
                     }
                 }
 
                 LazyColumn(
                     state = chatListState,
                     modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(bottom = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    contentPadding = PaddingValues(top = 4.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     if (messages.isEmpty()) {
-                        item(key = "intro") {
-                            Text(
-                                text = "我是小美，选款搭配随时问我",
-                                fontSize = 26.sp,
-                                lineHeight = 34.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.Black
-                            )
+                        item(key = "intro-spacer") {
+                            Spacer(Modifier.height(1.dp))
                         }
-                        item(key = "prompts") {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                XiaomeiPromptChip("💅 根据我的手型和肤色推荐") { ask("根据我的手型和肤色推荐适合的甲型、色号和款式") }
-                                XiaomeiPromptChip("✨ 适合上班通勤的简约款") { ask("适合上班通勤的简约美甲，显白一点") }
-                                XiaomeiPromptChip("🌸 甜酷氛围感美甲推荐") { ask("推荐甜酷氛围感美甲") }
-                                XiaomeiPromptChip("🎨 我想自己 DIY 一款", onClick = onOpenDiy)
-                            }
+                    } else {
+                        item(key = "time") {
+                            XiaomeiTimePill()
                         }
                     }
                     items(messages, key = { it.id }) { message ->
@@ -1919,6 +2103,23 @@ private fun XiaomeiAssistantSheet(
                 }
             }
 
+            if (messages.isEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .imePadding()
+                        .navigationBarsPadding()
+                        .padding(bottom = 124.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    XiaomeiPromptChip("💅 根据我的手型和肤色推荐") { sendMessage("根据我的手型和肤色推荐适合的甲型、色号和款式", null) }
+                    XiaomeiPromptChip("✨ 适合上班通勤的简约款") { sendMessage("适合上班通勤的简约美甲，显白一点", null) }
+                    XiaomeiPromptChip("🌸 甜酷氛围感美甲推荐") { sendMessage("推荐甜酷氛围感美甲", null) }
+                    XiaomeiPromptChip("🎨 我想自己 DIY 一款", onClick = onOpenDiy)
+                }
+            }
+
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -1930,42 +2131,207 @@ private fun XiaomeiAssistantSheet(
                 border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE7E1E4)),
                 shadowElevation = 2.dp
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = onInputChange,
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("发消息或按住说话") },
-                        singleLine = true,
-                        enabled = !loading,
-                        shape = MaterialTheme.shapes.extraLarge
-                    )
-                    Surface(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clickable(enabled = !loading && input.isNotBlank()) { ask(input) },
-                        shape = MaterialTheme.shapes.extraLarge,
-                        color = if (!loading && input.isNotBlank()) RoseAccent else Color.White,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, if (!loading && input.isNotBlank()) RoseAccent else Color.Black)
+                    pendingImageFile?.let { file ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            SubcomposeAsyncImage(
+                                model = file,
+                                contentDescription = "待发送图片",
+                                modifier = Modifier
+                                    .size(74.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(Color(0xFFF4EEF1)),
+                                contentScale = ContentScale.Crop
+                            ) {
+                                when (painter.state) {
+                                    is AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
+                                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Rounded.PhotoCamera, contentDescription = null, tint = Color(0xFFB98AA0))
+                                    }
+                                }
+                            }
+                            Text("图片已添加，可继续输入想要的风格", modifier = Modifier.weight(1f), fontSize = 13.sp, color = Color(0xFF85727B))
+                            TextButton(onClick = { pendingImageFile = null }, enabled = !loading) {
+                                Text("移除", color = Color(0xFFB37A90))
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (loading) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = RoseAccent)
-                            } else {
-                                Text("•))", fontSize = 14.sp, color = if (input.isNotBlank()) Color.White else Color.Black, fontWeight = FontWeight.Bold)
+                        Surface(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable(enabled = !loading) { openImagePicker() },
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = Color.White,
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.Black)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.PhotoCamera, contentDescription = "添加图片", tint = Color.Black, modifier = Modifier.size(21.dp))
+                            }
+                        }
+                        val canSend = input.trim().isNotBlank() || pendingImageFile != null
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(38.dp)
+                        ) {
+                            BasicTextField(
+                                value = input,
+                                onValueChange = onInputChange,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp),
+                                singleLine = true,
+                                enabled = !loading,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF6D666A)
+                                ),
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (input.isEmpty()) {
+                                            Text(
+                                                "发消息或附上一张手图",
+                                                fontSize = 14.sp,
+                                                color = Color(0xFF9D969B),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
+                            )
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable(enabled = !loading) { openImagePicker() },
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = Color.White,
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.Black)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("+", fontSize = 22.sp, color = Color.Black, fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier
+                                .size(width = 52.dp, height = 34.dp)
+                                .clickable(enabled = !loading && canSend) {
+                                    sendMessage(input, pendingImageFile)
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (!loading && canSend) Color(0xFFE7A9C0) else Color(0xFFE9E2E5)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (loading) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFFE7A9C0))
+                                } else {
+                                    Text("发送", fontSize = 12.sp, color = if (canSend) Color.White else Color(0xFFAAA0A5), fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        if (showHistory) {
+            XiaomeiHistoryDialog(
+                sessions = historySessions,
+                onDismiss = { showHistory = false },
+                onOpenSession = { session ->
+                    messages.clear()
+                    messages.addAll(session.messages)
+                    pendingImageFile = null
+                    onInputChange("")
+                    showHistory = false
+                }
+            )
+        }
     }
+}
+
+@Composable
+private fun XiaomeiTimePill() {
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            color = Color.White.copy(alpha = 0.42f),
+            shape = RoundedCornerShape(999.dp)
+        ) {
+            Text(
+                text = SimpleDateFormat("HH:mm", Locale.CHINA).format(Date()),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF8D747E)
+            )
+        }
+    }
+}
+
+@Composable
+private fun XiaomeiHistoryDialog(
+    sessions: List<XiaomeiChatSession>,
+    onDismiss: () -> Unit,
+    onOpenSession: (XiaomeiChatSession) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭", color = Color(0xFF8D6E7A))
+            }
+        },
+        title = { Text("最近三天", fontWeight = FontWeight.Bold) },
+        text = {
+            if (sessions.isEmpty()) {
+                Text("还没有可查看的历史对话。", color = Color(0xFF756B70))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(sessions, key = { it.id }) { session ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpenSession(session) },
+                            color = Color.White,
+                            shape = RoundedCornerShape(18.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEDE4E8))
+                        ) {
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(session.title, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2C2529), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(formatXiaomeiHistoryTime(session.updatedAt), fontSize = 12.sp, color = Color(0xFF8D8086))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        containerColor = Color(0xFFFBF8F7)
+    )
 }
 
 @Composable
@@ -1975,33 +2341,68 @@ private fun XiaomeiChatBubble(
     onTryOn: (String) -> Unit
 ) {
     val isUser = message.role == XiaomeiChatRole.User
+    val bubbleModifier = if (isUser && message.imagePath == null) {
+        Modifier.widthIn(min = 46.dp, max = 252.dp)
+    } else {
+        Modifier.fillMaxWidth(if (isUser) 0.72f else 0.78f)
+    }
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(9.dp)
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(if (isUser) 0.78f else 0.92f),
+            modifier = bubbleModifier,
             color = when {
                 message.isError -> Color(0xFFFFF1F1)
-                isUser -> RoseAccent
-                else -> Color(0xFFFFF7FA)
+                isUser -> Color(0xFFEFA0C5)
+                else -> Color(0xFFFFFBFC)
             },
             shape = RoundedCornerShape(
-                topStart = 22.dp,
-                topEnd = 22.dp,
-                bottomStart = if (isUser) 22.dp else 6.dp,
-                bottomEnd = if (isUser) 6.dp else 22.dp
+                topStart = 14.dp,
+                topEnd = 14.dp,
+                bottomStart = 14.dp,
+                bottomEnd = 14.dp
             ),
-            border = if (isUser) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2D9E3))
-        ) {
-            Text(
-                text = message.text,
-                modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
-                fontSize = 16.sp,
-                lineHeight = 23.sp,
-                color = if (isUser) Color.White else if (message.isError) MaterialTheme.colorScheme.error else Color(0xFF2B2528)
+            shadowElevation = if (isUser) 0.dp else 1.dp,
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                if (isUser) Color(0xFFE992BA) else Color.White.copy(alpha = 0.64f)
             )
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = if (isUser) 14.dp else 18.dp, vertical = if (isUser) 10.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                message.imagePath?.let { path ->
+                    SubcomposeAsyncImage(
+                        model = File(path),
+                        contentDescription = "聊天图片",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFFF4EEF1)),
+                        contentScale = ContentScale.Crop
+                    ) {
+                        when (painter.state) {
+                            is AsyncImagePainter.State.Success -> SubcomposeAsyncImageContent()
+                            else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Rounded.PhotoCamera, contentDescription = null, tint = Color(0xFFB98AA0))
+                            }
+                        }
+                    }
+                }
+                if (message.text.isNotBlank()) {
+                    Text(
+                        text = message.text,
+                        fontSize = if (isUser) 17.sp else 16.sp,
+                        lineHeight = if (isUser) 24.sp else 25.sp,
+                        color = if (message.isError) MaterialTheme.colorScheme.error else Color(0xFF261F23),
+                        fontWeight = if (isUser) FontWeight.Medium else FontWeight.Normal
+                    )
+                }
+            }
         }
         message.response?.let { result ->
             if (result.recommendations.isNotEmpty()) {
@@ -2023,38 +2424,34 @@ private fun MeimeiChatResponse.toXiaomeiDisplayText(): String {
     if (handAnalysis?.hasHand == false) {
         return "这张没看清手部，换一张手指和指甲完整露出的照片。"
     }
+    if (intent == "beauty_consultation.recommend_clarify" || intent == "unknown.fallback") {
+        return reply
+    }
     if (recommendations.isNotEmpty()) {
-        return "我挑了几款更适合你的，先看这几款。"
+        return reply.ifBlank { "我挑了几款更适合你的，先看这几款。" }
     }
-    return when (entry?.target) {
-        "diy" -> "可以。"
-        "styles" -> "可以。"
-        "favorites" -> "可以。"
-        "booking" -> "可以。"
-        "tryon", "tryon_upload" -> "先选一款，再上传手部照片。"
-        else -> reply
-            .replace("入口", "")
-            .replace("根据你的手型和肤色", "按你的需求")
-            .replace("根据手型和肤色", "按你的需求")
-            .trim()
-            .ifBlank { "可以。" }
-    }
+    return reply
+        .replace("入口", "")
+        .replace("根据你的手型和肤色", "按你的需求")
+        .replace("根据手型和肤色", "按你的需求")
+        .trim()
+        .ifBlank { "好呀。" }
 }
 
 @Composable
 private fun XiaomeiTypingBubble() {
     Surface(
         modifier = Modifier.fillMaxWidth(0.62f),
-        color = Color(0xFFFFF7FA),
+        color = Color.White,
         shape = RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp, bottomEnd = 22.dp, bottomStart = 6.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF2D9E3))
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEAE3E6))
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = RoseAccent)
+            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Color(0xFFE7A9C0))
             Text("小美正在分析...", fontSize = 15.sp, color = Color(0xFF6F5962))
         }
     }
@@ -5511,16 +5908,16 @@ private fun TryOnHistoryManageBar(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding(),
+        modifier = modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
         shadowElevation = 12.dp
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 14.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(top = 14.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
