@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -70,6 +71,8 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.LocationOn
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhotoCamera
@@ -1123,7 +1126,7 @@ fun NailMindApp() {
         back()
     }
     val showHomeChrome = current is Screen.Tab && (current.tab == MainTab.Home || current.tab == MainTab.TryOn)
-    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner || current is Screen.Xiaomei
+    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner || current is Screen.Xiaomei || current is Screen.StoreDetail
     val styleDetailStyle = (current as? Screen.StyleDetail)?.let { screen ->
         styleItems.firstOrNull { it.id == screen.styleId } ?: styleItems.firstOrNull()
     }
@@ -1660,6 +1663,7 @@ fun NailMindApp() {
                     val store = storeItems.firstOrNull { it.id == screen.storeId } ?: return@AnimatedContent
                     StoreDetailScreen(
                         store = store,
+                        onBack = ::back,
                         onBook = {
                             selectedStoreId = store.id
                             val targetStyleId = screen.styleId ?: styleItems.firstOrNull()?.id
@@ -5991,52 +5995,355 @@ private fun FavoritesScreen(
 }
 
 @Composable
-private fun StoreDetailScreen(store: Store, onBook: () -> Unit) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 112.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp)
+private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onBook: () -> Unit) {
+    val context = LocalContext.current
+    val primary = Color(0xFFF25F86)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFAF7F6))
     ) {
-        item {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        StoreCover(store)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(store.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            Text("★ ${store.score} · ${store.reviewCount}条评价 · ${store.priceBand}", color = Color(0xFFFF6B2C), fontWeight = FontWeight.SemiBold)
-                            Text("${store.statusText} ${store.openHours}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
-                            Text(store.address, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.66f), fontSize = 13.sp)
-                        }
-                    }
-                    TagRow(store.tags)
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 112.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            item { StoreDetailHero(onBack = onBack, primary = primary) }
+            item {
+                StoreDetailInfoCard(
+                    store = store,
+                    primary = primary,
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .offset(y = (-42).dp)
+                )
+            }
+            item {
+                StoreDetailGallery(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .offset(y = (-42).dp)
+                )
+            }
+            item {
+                StoreProjectSection(
+                    primary = primary,
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .offset(y = (-42).dp)
+                )
+            }
+        }
+        StoreDetailBottomBar(
+            primary = primary,
+            onConsult = { Toast.makeText(context, "咨询功能待接入", Toast.LENGTH_SHORT).show() },
+            onBook = onBook,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
+@Composable
+private fun StoreDetailHero(onBack: () -> Unit, primary: Color) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(190.dp)
+    ) {
+        Image(
+            painter = painterResource(R.drawable.store_detail_hero),
+            contentDescription = "门店环境",
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp).clickable(onClick = onBack),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回", tint = Color(0xFF222222), modifier = Modifier.size(23.dp))
+                }
+            }
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.FavoriteBorder, contentDescription = "收藏", tint = primary, modifier = Modifier.size(25.dp))
                 }
             }
         }
-        item {
-            InfoGrid(
-                listOf(
-                    "最近可约" to store.nearestSlot,
-                    "款式匹配度" to "${store.matchScore}%",
-                    "美甲师" to "${store.artists} 位可预约",
-                    "门店作品" to store.works,
-                    "距离" to store.distance,
-                    "优惠" to store.couponText
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
+        ) {
+            repeat(4) { index ->
+                Box(
+                    modifier = Modifier
+                        .size(if (index == 0) 8.dp else 7.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color.White.copy(alpha = if (index == 0) 1f else 0.62f))
                 )
-            )
-        }
-        item {
-            DetailTextSection(
-                title = "到店说明",
-                body = "预约后请按时到店，最终服务时长和价格以门店确认款式为准。试戴同款会同步给门店作为参考，方便美甲师提前准备颜色和素材。"
-            )
-        }
-        item {
-            Button(onClick = onBook, modifier = Modifier.fillMaxWidth()) { Text("立即预约") }
+            }
         }
     }
 }
 
+@Composable
+private fun StoreDetailInfoCard(store: Store, primary: Color, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Image(
+                    painter = painterResource(R.drawable.store_detail_logo),
+                    contentDescription = "门店 Logo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
+                        .border(1.dp, primary.copy(alpha = 0.35f), RoundedCornerShape(25.dp))
+                )
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        store.name.ifBlank { "Luna Nail 美甲工作室" },
+                        color = Color(0xFF222222),
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    StoreDetailMetaLine(
+                        listOf("评分 ${store.score}", averagePriceText(store).replace("人均", "人均 "), "距你 ${store.distance}"),
+                        color = Color(0xFF666666)
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(store.statusText, color = primary, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold)
+                        StoreDetailDivider()
+                        Text(store.openHours, color = Color(0xFF666666), fontSize = 12.sp, lineHeight = 16.sp)
+                    }
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color(0xFFEEEEEE))
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                Icon(Icons.Rounded.LocationOn, contentDescription = null, tint = primary, modifier = Modifier.size(18.dp))
+                Text(
+                    "地址： ${store.address.ifBlank { store.area.ifBlank { "静安区恩园路88号3楼305室" } }}",
+                    modifier = Modifier.weight(1f),
+                    color = Color(0xFF222222),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color(0xFF666666), modifier = Modifier.size(17.dp))
+            }
+        }
+    }
+}
+@Composable
+private fun StoreDetailMetaLine(items: List<String>, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+        items.forEachIndexed { index, item ->
+            Text(item, color = color, fontSize = 11.sp, lineHeight = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (index < items.lastIndex) StoreDetailDivider()
+        }
+    }
+}
+
+@Composable
+private fun StoreDetailDivider() {
+    Box(
+        modifier = Modifier
+            .width(1.dp)
+            .height(14.dp)
+            .background(Color(0xFF666666).copy(alpha = 0.42f))
+    )
+}
+
+@Composable
+private fun StoreDetailGallery(modifier: Modifier = Modifier) {
+    StoreDetailSectionCard(modifier = modifier) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("图片展示", color = Color(0xFF222222), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.weight(1f))
+            Text("查看更多", color = Color(0xFF666666), fontSize = 12.sp)
+            Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color(0xFF666666), modifier = Modifier.size(16.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            StoreGalleryImage(R.drawable.store_gallery_environment_1, Modifier.weight(1f))
+            StoreGalleryImage(R.drawable.store_gallery_nail_work, Modifier.weight(1f))
+            StoreGalleryImage(R.drawable.store_gallery_environment_2, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun StoreGalleryImage(imageRes: Int, modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(imageRes),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .height(140.dp)
+            .clip(RoundedCornerShape(9.dp))
+    )
+}
+
+private data class StoreProjectItem(
+    val name: String,
+    val subtitle: String,
+    val price: String,
+    val duration: String,
+    val imageRes: Int,
+    val hot: Boolean = false
+)
+
+private val storeProjectItems = listOf(
+    StoreProjectItem("纯色本甲", "可选多色  |  显白百搭", "¥128", "60分钟", R.drawable.diy_nail_short_square),
+    StoreProjectItem("本甲（颜色+款式+钻饰）", "款式丰富  |  精致闪耀", "¥228", "120分钟", R.drawable.diy_nail_medium_oval, hot = true),
+    StoreProjectItem("法式本甲", "经典优雅  |  气质百搭", "¥158", "90分钟", R.drawable.diy_nail_short_round),
+    StoreProjectItem("猫眼美甲", "磁吸效果  |  高级显白", "¥198", "90分钟", R.drawable.diy_nail_long_oval, hot = true)
+)
+
+@Composable
+private fun StoreProjectSection(primary: Color, modifier: Modifier = Modifier) {
+    StoreDetailSectionCard(modifier = modifier) {
+        Text("项目", color = Color(0xFF222222), fontSize = 19.sp, fontWeight = FontWeight.Bold)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            storeProjectItems.forEach { item ->
+                StoreProjectRow(item = item, primary = primary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StoreProjectRow(item: StoreProjectItem, primary: Color) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEEEEEE))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFFFFF6F8)),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(item.imageRes),
+                    contentDescription = item.name,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(item.name, color = Color(0xFF222222), fontSize = 15.sp, lineHeight = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(item.subtitle, modifier = Modifier.weight(1f, fill = false), color = Color(0xFF666666), fontSize = 12.sp, lineHeight = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (item.hot) {
+                        Surface(shape = RoundedCornerShape(4.dp), color = Color.White, border = androidx.compose.foundation.BorderStroke(1.dp, primary.copy(alpha = 0.45f))) {
+                            Text("热门推荐", modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), color = primary, fontSize = 10.sp, lineHeight = 12.sp)
+                        }
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(item.price, color = primary, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = Color(0xFF666666), modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+@Composable
+private fun StoreDetailSectionCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp), content = content)
+    }
+}@Composable
+private fun StoreDetailBottomBar(primary: Color, onConsult: () -> Unit, onBook: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedButton(
+                onClick = onConsult,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEED0D7)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF222222))
+            ) {
+                Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = primary, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.width(7.dp))
+                Text("咨询", color = Color(0xFF222222), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+            Button(
+                onClick = onBook,
+                modifier = Modifier
+                    .weight(1.45f)
+                    .height(46.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primary)
+            ) {
+                Icon(Icons.Rounded.CalendarMonth, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("预约", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
 @Composable
 private fun BookingFormScreen(
     store: Store,
@@ -6677,7 +6984,7 @@ private fun StoreCard(store: Store, onClick: () -> Unit) {
                         fontSize = 16.sp,
                         lineHeight = 19.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Start
                     )
