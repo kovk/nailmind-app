@@ -1,4 +1,4 @@
-package com.nailmind.app.data.api
+﻿package com.nailmind.app.data.api
 
 import okhttp3.MultipartBody
 import retrofit2.Response
@@ -95,6 +95,15 @@ interface NailMindApiService {
 
     @GET("api/stores/{storeId}/slots")
     suspend fun storeSlots(@Path("storeId") storeId: String): StoreSlotsResponse
+
+    @POST("api/chats")
+    suspend fun startChat(@Body request: ChatStartRequest): ChatStartResponse
+
+    @GET("api/chats/{conversationId}/messages")
+    suspend fun chatMessages(@Path("conversationId") conversationId: String): ChatMessagesResponse
+
+    @POST("api/chats/{conversationId}/messages")
+    suspend fun sendChatMessage(@Path("conversationId") conversationId: String, @Body request: ChatMessageCreateRequest): ChatMessageResponse
 
     @GET("api/bookings")
     suspend fun bookings(): BookingsResponse

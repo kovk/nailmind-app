@@ -1,4 +1,4 @@
-package com.nailmind.app.data.api
+﻿package com.nailmind.app.data.api
 
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -156,6 +156,14 @@ class NailMindRepository(
     suspend fun storeDetail(storeId: String): StoreDto = service.storeDetail(storeId)
 
     suspend fun storeSlots(storeId: String): StoreSlotsResponse = service.storeSlots(storeId)
+
+    suspend fun startChat(storeId: String, initialMessage: String = ""): ChatStartResponse =
+        service.startChat(ChatStartRequest(storeId = storeId, initialMessage = initialMessage))
+
+    suspend fun chatMessages(conversationId: String): ChatMessagesResponse = service.chatMessages(conversationId)
+
+    suspend fun sendChatMessage(conversationId: String, body: String): ChatMessageResponse =
+        service.sendChatMessage(conversationId, ChatMessageCreateRequest(body = body))
 
     suspend fun bookings(): BookingsResponse = service.bookings()
 

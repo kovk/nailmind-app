@@ -1,4 +1,4 @@
-package com.nailmind.app.data.api
+﻿package com.nailmind.app.data.api
 
 import com.nailmind.app.data.config.AppConfig
 
@@ -279,6 +279,52 @@ data class StoreSlotsResponse(
     val slots: List<String>
 )
 
+data class ChatStartRequest(
+    val storeId: String,
+    val initialMessage: String = ""
+)
+
+data class ChatMessageCreateRequest(
+    val body: String
+)
+
+data class ChatConversationDto(
+    val id: String,
+    val storeId: String,
+    val storeName: String = "",
+    val customerName: String = "",
+    val customerEmail: String = "",
+    val status: String = "open",
+    val lastMessage: String = "",
+    val lastMessageAt: String? = null,
+    val createdAt: String = "",
+    val updatedAt: String = ""
+)
+
+data class ChatMessageDto(
+    val id: String,
+    val conversationId: String,
+    val senderRole: String,
+    val senderUserId: Int? = null,
+    val body: String,
+    val createdAt: String,
+    val readAt: String? = null
+)
+
+data class ChatStartResponse(
+    val conversation: ChatConversationDto,
+    val messages: List<ChatMessageDto> = emptyList()
+)
+
+data class ChatMessagesResponse(
+    val conversation: ChatConversationDto,
+    val items: List<ChatMessageDto> = emptyList()
+)
+
+data class ChatMessageResponse(
+    val message: ChatMessageDto,
+    val conversation: ChatConversationDto
+)
 data class BookingRequest(
     val storeId: String,
     val styleId: String,

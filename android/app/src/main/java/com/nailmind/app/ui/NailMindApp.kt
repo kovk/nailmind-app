@@ -58,6 +58,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,6 +146,7 @@ import com.nailmind.app.R
 import com.nailmind.app.data.api.AuthResponse
 import com.nailmind.app.data.api.AuthUserDto
 import com.nailmind.app.data.api.BookingDto
+import com.nailmind.app.data.api.ChatMessageDto
 import com.nailmind.app.data.api.HomeResponse
 import com.nailmind.app.data.api.MeimeiChatResponse
 import com.nailmind.app.data.api.MeimeiRecommendationDto
@@ -201,6 +203,7 @@ private sealed interface Screen {
     data object BookingRecords : Screen
     data object Reviews : Screen
     data class StoreDetail(val storeId: String, val styleId: String? = null) : Screen
+    data class Chat(val conversationId: String, val storeId: String, val storeName: String) : Screen
     data class BookingForm(val storeId: String, val styleId: String) : Screen
     data class BookingConfirm(val bookingId: String) : Screen
     data class BookingSuccess(val bookingId: String) : Screen
@@ -535,25 +538,31 @@ private fun StyleDto.toUi(): NailStyle = NailStyle(
     tryOnStyleId = tryOnStyleId
 )
 
-private fun StoreDto.toUi(): Store = Store(
-    id = id,
-    name = name,
-    distance = distance,
-    priceBand = priceBand,
-    score = score,
-    slots = slots,
-    openHours = openHours,
-    artists = artists,
-    works = works,
-    reviewCount = works.filter { it.isDigit() }.toIntOrNull() ?: 0,
-    area = name.substringAfter("（", "").substringBefore("）", "").ifBlank { "附近商圈" },
-    address = "门店地址请以到店前确认为准",
-    tags = listOf("支持预约", "试戴同款", "到店确认"),
-    nearestSlot = slots.firstOrNull()?.let { "$it 可约" } ?: "今日可约",
-    matchScore = 88,
-    salesText = works
-)
-
+private fun StoreDto.toUi(): Store {
+    val mock = reservationSampleStores.firstOrNull { it.id == id }
+    val fallbackArea = name.substringAfter("\uFF08", "").substringBefore("\uFF09", "").ifBlank { "\u9644\u8FD1\u5546\u5708" }
+    return Store(
+        id = id,
+        name = name,
+        distance = distance,
+        priceBand = priceBand,
+        score = score,
+        slots = slots,
+        openHours = openHours,
+        artists = artists,
+        works = works,
+        coverTone = mock?.coverTone ?: Color(0xFFEAD8D1),
+        reviewCount = works.filter { it.isDigit() }.toIntOrNull() ?: 0,
+        statusText = mock?.statusText ?: "\u8425\u4E1A\u4E2D",
+        address = mock?.address ?: "\u95E8\u5E97\u5730\u5740\u8BF7\u4EE5\u5230\u5E97\u524D\u786E\u8BA4\u4E3A\u51C6",
+        area = mock?.area ?: fallbackArea,
+        tags = mock?.tags ?: listOf("\u652F\u6301\u9884\u7EA6", "\u8BD5\u6234\u540C\u6B3E", "\u5230\u5E97\u786E\u8BA4"),
+        nearestSlot = mock?.nearestSlot ?: slots.firstOrNull()?.let { "$it \u53EF\u7EA6" } ?: "\u4ECA\u65E5\u53EF\u7EA6",
+        matchScore = mock?.matchScore ?: 88,
+        couponText = mock?.couponText ?: "\u65B0\u5BA2\u9884\u7EA6\u7ACB\u51CF",
+        salesText = mock?.salesText ?: works
+    )
+}
 private fun AuthUserDto.toUi(): AuthUser = AuthUser(name = name, email = email, preferences = preferences)
 
 private fun BookingDto.toUi(): BookingRecord = BookingRecord(
@@ -736,6 +745,15 @@ fun NailMindApp() {
     var lastTryOnHandId by remember { mutableStateOf<String?>(null) }
     var bookingSubmitting by remember { mutableStateOf(false) }
     var bookingError by remember { mutableStateOf<String?>(null) }
+    var chatMessages by remember { mutableStateOf(emptyList<ChatMessageDto>()) }
+    var chatLoading by remember { mutableStateOf(false) }
+    var chatSending by remember { mutableStateOf(false) }
+    var chatError by remember { mutableStateOf<String?>(null) }
+    var merchantReplyNotice by rememberSaveable { mutableStateOf(false) }
+    var merchantReplyPreview by rememberSaveable { mutableStateOf("") }
+    var merchantReplyConversationId by rememberSaveable { mutableStateOf("") }
+    var merchantReplyStoreId by rememberSaveable { mutableStateOf("") }
+    var merchantReplyStoreName by rememberSaveable { mutableStateOf("") }
     var tryOnSubmitting by remember { mutableStateOf(false) }
     var tryOnError by remember { mutableStateOf<String?>(null) }
     var pageRefreshing by remember { mutableStateOf(false) }
@@ -826,6 +844,23 @@ fun NailMindApp() {
                 )
             }
         }
+    }
+
+    fun openStyleDetail(
+        styleId: String,
+        sourcePage: String,
+        sourceChannel: String,
+        payload: Map<String, Any>? = null
+    ) {
+        if (styleId.isBlank()) return
+        trackEvent(
+            eventName = "style_click",
+            styleId = styleId,
+            sourcePage = sourcePage,
+            sourceChannel = sourceChannel,
+            payload = payload
+        )
+        go(Screen.StyleDetail(styleId))
     }
 
     fun refreshTryOnHistory() {
@@ -1080,6 +1115,14 @@ fun NailMindApp() {
 
     val displayedTryOnHistoryItems = buildDisplayedTryOnHistory(tryOnHistoryItems, tryOnStatus)
 
+    fun updateMerchantReplyNotice(messages: List<ChatMessageDto>, conversationId: String, storeId: String, storeName: String) {
+        val latestMerchantMessage = messages.lastOrNull { it.senderRole != "customer" } ?: return
+        merchantReplyNotice = true
+        merchantReplyPreview = latestMerchantMessage.body
+        merchantReplyConversationId = conversationId
+        merchantReplyStoreId = storeId
+        merchantReplyStoreName = storeName
+    }
     fun findBooking(bookingId: String): BookingDto? {
         if (pendingBooking?.id == bookingId) return pendingBooking
         val record = bookingRecords.firstOrNull { it.id == bookingId } ?: return null
@@ -1126,7 +1169,7 @@ fun NailMindApp() {
         back()
     }
     val showHomeChrome = current is Screen.Tab && (current.tab == MainTab.Home || current.tab == MainTab.TryOn)
-    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner || current is Screen.Xiaomei || current is Screen.StoreDetail
+    val hideAppChrome = showHomeChrome || current is Screen.DiyDesigner || current is Screen.Xiaomei || current is Screen.StoreDetail || current is Screen.Chat
     val styleDetailStyle = (current as? Screen.StyleDetail)?.let { screen ->
         styleItems.firstOrNull { it.id == screen.styleId } ?: styleItems.firstOrNull()
     }
@@ -1163,6 +1206,7 @@ fun NailMindApp() {
         Screen.BookingRecords -> "预约记录"
         Screen.Reviews -> "我的评价"
         is Screen.StoreDetail -> "门店详情"
+        is Screen.Chat -> "咨询"
         is Screen.BookingForm -> "填写预约"
         is Screen.BookingConfirm -> "确认预约"
         is Screen.BookingSuccess -> "预约成功"
@@ -1424,7 +1468,7 @@ fun NailMindApp() {
                             stack.clear()
                             stack.add(Screen.Tab(MainTab.Styles))
                         },
-                        onStyleClick = { go(Screen.StyleDetail(it)) }
+                        onStyleClick = { openStyleDetail(it, "home", "home_style_card") }
                     )
                     MainTab.Styles -> StylesScreen(
                         styles = styleItems,
@@ -1441,7 +1485,7 @@ fun NailMindApp() {
                         onSortModeChange = { styleBrowseSortMode = it },
                         onQueryChange = { styleBrowseQuery = it },
                         onRefresh = ::refreshPageData,
-                        onStyleClick = { go(Screen.StyleDetail(it)) }
+                        onStyleClick = { openStyleDetail(it, "styles", "style_grid_card") }
                     )
                     MainTab.TryOn -> DiyDesignerScreen(
                         onBackHome = {
@@ -1469,6 +1513,16 @@ fun NailMindApp() {
                         user = authUser ?: AuthUser("账户", ""),
                         favoritesCount = favorites.size,
                         tryOnHistoryCount = displayedTryOnHistoryItems.size,
+                        hasMerchantReply = merchantReplyNotice,
+                        merchantReplyPreview = merchantReplyPreview,
+                        onMessageCenter = {
+                            merchantReplyNotice = false
+                            if (merchantReplyConversationId.isNotBlank()) {
+                                go(Screen.Chat(merchantReplyConversationId, merchantReplyStoreId, merchantReplyStoreName.ifBlank { "门店咨询" }))
+                            } else {
+                                Toast.makeText(context, "暂无新的商家回复", Toast.LENGTH_SHORT).show()
+                            }
+                        },
                         onFavorites = { go(Screen.Favorites) },
                         onTryOnHistory = { go(Screen.TryOnHistory) },
                         onRecords = { go(Screen.BookingRecords) },
@@ -1503,19 +1557,18 @@ fun NailMindApp() {
                     query = screen.query,
                     result = searchResults,
                     onStyleClick = {
-                        trackEvent(
-                            eventName = "search_result_click",
+                        openStyleDetail(
                             styleId = it,
                             sourcePage = "search_result",
+                            sourceChannel = "search_result_card",
                             payload = mapOf("query" to screen.query)
                         )
-                        go(Screen.StyleDetail(it))
                     }
                 )
 
                 Screen.Ranking -> RankingScreen(
                     styles = (homeHot + homeRecommended + styleItems).distinctBy { it.id }.take(12),
-                    onStyleClick = { go(Screen.StyleDetail(it)) }
+                    onStyleClick = { openStyleDetail(it, "ranking", "ranking_row") }
                 )
 
                 Screen.DiyDesigner -> DiyDesignerScreen(
@@ -1557,9 +1610,7 @@ fun NailMindApp() {
                         }
                     },
                     onOpenStyle = { styleId ->
-                        if (styleId.isNotBlank()) {
-                            go(Screen.StyleDetail(styleId))
-                        }
+                        openStyleDetail(styleId, "assistant", "assistant_style_link")
                     }
                 )
 
@@ -1591,7 +1642,7 @@ fun NailMindApp() {
                     favorite = favorites.contains(screen.styleId),
                     resultStatus = tryOnStatus.status,
                     resultBitmap = latestTryOnBitmap,
-                    onOpenStyle = { go(Screen.StyleDetail(screen.styleId)) },
+                    onOpenStyle = { openStyleDetail(screen.styleId, "tryon_result", "result_style_button") },
                     onRetake = { go(Screen.TryOnUpload(screen.styleId)) },
                     onToggleFavorite = { toggleFavorite(screen.styleId) },
                     onBook = { openBookingForStyle(screen.styleId) },
@@ -1646,7 +1697,7 @@ fun NailMindApp() {
                     styles = styleItems.filter { favorites.contains(it.id) },
                     refreshing = pageRefreshing,
                     onRefresh = ::refreshPageData,
-                    onStyleClick = { go(Screen.StyleDetail(it)) },
+                    onStyleClick = { openStyleDetail(it, "favorites", "favorite_style_button") },
                     onRetake = { go(Screen.TryOnUpload(it, true)) },
                     onBook = ::openBookingForStyle
                 )
@@ -1664,6 +1715,24 @@ fun NailMindApp() {
                     StoreDetailScreen(
                         store = store,
                         onBack = ::back,
+                        onConsult = {
+                            coroutineScope.launch {
+                                chatLoading = true
+                                chatError = null
+                                runCatching {
+                                    repository.startChat(store.id, "你好，我想咨询一下这家门店。")
+                                }.onSuccess { response ->
+                                    chatMessages = response.messages
+                                    val chatStoreName = response.conversation.storeName.ifBlank { store.name }
+                                    updateMerchantReplyNotice(response.messages, response.conversation.id, store.id, chatStoreName)
+                                    go(Screen.Chat(response.conversation.id, store.id, chatStoreName))
+                                }.onFailure { error ->
+                                    chatError = error.message ?: "发起咨询失败"
+                                    Toast.makeText(context, chatError ?: "发起咨询失败", Toast.LENGTH_SHORT).show()
+                                }
+                                chatLoading = false
+                            }
+                        },
                         onBook = {
                             selectedStoreId = store.id
                             val targetStyleId = screen.styleId ?: styleItems.firstOrNull()?.id
@@ -1676,23 +1745,73 @@ fun NailMindApp() {
                     )
                 }
 
+                is Screen.Chat -> {
+                    LaunchedEffect(screen.conversationId) {
+                        chatLoading = true
+                        chatError = null
+                        runCatching { repository.chatMessages(screen.conversationId).items }
+                            .onSuccess {
+                                chatMessages = it
+                                updateMerchantReplyNotice(it, screen.conversationId, screen.storeId, screen.storeName)
+                            }
+                            .onFailure { error -> chatError = error.message ?: "加载聊天失败" }
+                        chatLoading = false
+                    }
+                    StoreChatScreen(
+                        storeName = screen.storeName,
+                        messages = chatMessages,
+                        loading = chatLoading,
+                        sending = chatSending,
+                        errorMessage = chatError,
+                        onBack = ::back,
+                        onRefresh = {
+                            coroutineScope.launch {
+                                chatLoading = true
+                                chatError = null
+                                runCatching { repository.chatMessages(screen.conversationId).items }
+                                    .onSuccess {
+                                        chatMessages = it
+                                        updateMerchantReplyNotice(it, screen.conversationId, screen.storeId, screen.storeName)
+                                    }
+                                    .onFailure { error -> chatError = error.message ?: "加载聊天失败" }
+                                chatLoading = false
+                            }
+                        },
+                        onSend = { body ->
+                            coroutineScope.launch {
+                                chatSending = true
+                                chatError = null
+                                runCatching {
+                                    repository.sendChatMessage(screen.conversationId, body)
+                                    repository.chatMessages(screen.conversationId).items
+                                }.onSuccess {
+                                    chatMessages = it
+                                    updateMerchantReplyNotice(it, screen.conversationId, screen.storeId, screen.storeName)
+                                }
+                                    .onFailure { error ->
+                                        chatError = error.message ?: "发送失败"
+                                        Toast.makeText(context, chatError ?: "发送失败", Toast.LENGTH_SHORT).show()
+                                    }
+                                chatSending = false
+                            }
+                        }
+                    )
+                }
+
                 is Screen.BookingForm -> {
-                    val store = storeItems.firstOrNull { it.id == selectedStoreId } ?: return@AnimatedContent
                     val style = styleItems.firstOrNull { it.id == screen.styleId } ?: return@AnimatedContent
                     BookingFormScreen(
-                        store = store,
                         style = style,
                         storeOptions = storeItems,
                         submitting = bookingSubmitting,
                         errorMessage = bookingError,
-                        onStoreChange = { selectedStoreId = it },
-                        onSubmit = { name, phone, note, slot ->
+                        onSubmit = { storeId, name, phone, note, slot ->
                             coroutineScope.launch {
                                 bookingSubmitting = true
                                 bookingError = null
                                 runCatching {
                                     repository.createBooking(
-                                        storeId = selectedStoreId,
+                                        storeId = storeId,
                                         styleId = screen.styleId,
                                         slot = slot,
                                         name = name,
@@ -1711,7 +1830,6 @@ fun NailMindApp() {
                         }
                     )
                 }
-
                 is Screen.BookingConfirm -> {
                     val booking = findBooking(screen.bookingId) ?: return@AnimatedContent
                     BookingConfirmScreen(
@@ -2626,9 +2744,13 @@ private fun HomeScreen(
     onStyleClick: (String) -> Unit
 ) {
     val recommendationFeed = (recommended + hot).distinctBy { it.id }
-    var selectedHomeCategory by remember { mutableStateOf("推荐") }
-    val displayedRecommendationFeed = remember(recommendationFeed, selectedHomeCategory) {
-        filterHomeRecommendationFeed(recommendationFeed, selectedHomeCategory)
+    val categories = homeRecommendationCategories
+    var selectedHomeCategory by rememberSaveable { mutableStateOf(categories.first()) }
+    val pagerState = rememberPagerState(pageCount = { categories.size })
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(pagerState.currentPage) {
+        selectedHomeCategory = categories[pagerState.currentPage]
     }
 
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = Modifier.fillMaxSize()) {
@@ -2645,56 +2767,39 @@ private fun HomeScreen(
                 contentPadding = PaddingValues(bottom = 96.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-            item { ActivityBannerPlaceholder(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp)) }
-            item {
-                HomeFeatureNavigation(
-                    onRanking = onRanking,
-                    onAiPick = onAiPick,
-                    onTrend = onTrend,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-            stickyHeader {
-                HomeCategoryTabs(
-                    selectedCategory = selectedHomeCategory,
-                    onCategoryChange = { selectedHomeCategory = it },
-                    modifier = Modifier
-                )
-            }
-            if (displayedRecommendationFeed.isEmpty()) {
+                item { ActivityBannerPlaceholder(modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 12.dp)) }
                 item {
-                    EmptyState(
-                        title = "暂无推荐款式",
-                        subtitle = "下拉刷新后会展示适合你的美甲款式"
+                    HomeFeatureNavigation(
+                        onRanking = onRanking,
+                        onAiPick = onAiPick,
+                        onTrend = onTrend,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
-            } else {
-                items(displayedRecommendationFeed.chunked(2)) { rowStyles ->
-                    Row(
+                stickyHeader {
+                    HomeCategoryTabs(
+                        categories = categories,
+                        selectedCategory = selectedHomeCategory,
+                        onCategoryChange = { category ->
+                            selectedHomeCategory = category
+                            val targetPage = categories.indexOf(category).coerceAtLeast(0)
+                            coroutineScope.launch { pagerState.animateScrollToPage(targetPage) }
+                        },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        rowStyles.forEach { style ->
-                            WaterfallStyleCard(
-                                style = style,
-                                modifier = Modifier.weight(1f),
-                                onClick = { onStyleClick(style.id) }
-                            )
-                        }
-                        if (rowStyles.size == 1) {
-                            Spacer(Modifier.weight(1f))
-                        }
-                    }
+                    )
                 }
-            }
+                item {
+                    HomeRecommendationPager(
+                        categories = categories,
+                        recommendationFeed = recommendationFeed,
+                        pagerState = pagerState,
+                        onStyleClick = onStyleClick
+                    )
+                }
             }
         }
     }
 }
-
 @Composable
 private fun HomeTopHero(onSearch: () -> Unit) {
     Column {
@@ -2986,46 +3091,109 @@ private fun HomeHero(onSearch: () -> Unit) {
     }
 }
 
-@Composable
-private fun HomeCategoryTabs(
-    selectedCategory: String,
-    onCategoryChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val categories = listOf("推荐", "日常", "通勤", "约会", "旅游", "个性")
-    val scrollState = rememberScrollState()
+private val homeRecommendationCategories = listOf("推荐", "日常", "通勤", "约会", "旅游", "个性")
 
-    Row(
-        modifier = modifier
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun HomeRecommendationPager(
+    categories: List<String>,
+    recommendationFeed: List<NailStyle>,
+    pagerState: PagerState,
+    onStyleClick: (String) -> Unit
+) {
+    val currentCategory = categories.getOrElse(pagerState.currentPage) { categories.first() }
+    val currentFeed = remember(recommendationFeed, currentCategory) {
+        filterHomeRecommendationFeed(recommendationFeed, currentCategory)
+    }
+    val rowCount = ((currentFeed.size + 1) / 2).coerceAtLeast(1)
+    val pagerHeight = if (currentFeed.isEmpty()) 180.dp else ((rowCount * 304) + ((rowCount - 1) * 6)).dp
+
+    HorizontalPager(
+        state = pagerState,
+        modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
-            .background(Color.White),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Row(
-            modifier = Modifier
-                .horizontalScroll(scrollState)
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            categories.forEach { category ->
-                Box(
-                    modifier = Modifier
-                        .width(78.dp)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    HomeCategoryTab(
-                        text = category,
-                        selected = selectedCategory == category,
-                        onClick = { onCategoryChange(category) }
-                    )
+            .height(pagerHeight),
+        verticalAlignment = Alignment.Top
+    ) { page ->
+        val category = categories[page]
+        val pageFeed = remember(recommendationFeed, category) {
+            filterHomeRecommendationFeed(recommendationFeed, category)
+        }
+        if (pageFeed.isEmpty()) {
+            EmptyState(
+                title = "暂无推荐款式",
+                subtitle = "下拉刷新后会展示适合你的美甲款式"
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                pageFeed.chunked(2).forEach { rowStyles ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        rowStyles.forEach { style ->
+                            WaterfallStyleCard(
+                                style = style,
+                                modifier = Modifier.weight(1f),
+                                onClick = { onStyleClick(style.id) }
+                            )
+                        }
+                        if (rowStyles.size == 1) {
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+@Composable
+private fun HomeCategoryTabs(
+    categories: List<String>,
+    selectedCategory: String,
+    onCategoryChange: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val listState = rememberLazyListState()
+    val tabWidth = 78.dp
+
+    LaunchedEffect(selectedCategory, categories) {
+        val index = categories.indexOf(selectedCategory)
+        if (index >= 0) {
+            val targetIndex = if (index <= 1) 0 else (index - 1).coerceAtMost(categories.lastIndex)
+            listState.animateScrollToItem(targetIndex)
+        }
+    }
+
+    LazyRow(
+        state = listState,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(46.dp)
+            .background(Color.White),
+        contentPadding = PaddingValues(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        items(categories, key = { it }) { category ->
+            Box(
+                modifier = Modifier
+                    .width(tabWidth)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.Center
+            ) {
+                HomeCategoryTab(
+                    text = category,
+                    selected = selectedCategory == category,
+                    onClick = { onCategoryChange(category) }
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun HomeCategoryTab(
     text: String,
@@ -3059,7 +3227,6 @@ private fun HomeCategoryTab(
         )
     }
 }
-
 private fun filterHomeRecommendationFeed(styles: List<NailStyle>, category: String): List<NailStyle> {
     if (category == "推荐") return styles
     val keywords = when (category) {
@@ -5101,6 +5268,9 @@ private fun ProfileScreen(
     user: AuthUser,
     favoritesCount: Int,
     tryOnHistoryCount: Int,
+    hasMerchantReply: Boolean,
+    merchantReplyPreview: String,
+    onMessageCenter: () -> Unit,
     onFavorites: () -> Unit,
     onTryOnHistory: () -> Unit,
     onRecords: () -> Unit,
@@ -5188,10 +5358,14 @@ private fun ProfileScreen(
                 ProfileMenuRow("风格档案", "管理肤色、偏好和常用甲型", Icons.Rounded.Person) {
                     Toast.makeText(context, "风格档案功能待接入", Toast.LENGTH_SHORT).show()
                 }
-                ProfileMenuRow("消息中心", "查看通知、预约提醒和系统消息", Icons.Rounded.NotificationsNone) {
-                    Toast.makeText(context, "消息中心功能待接入", Toast.LENGTH_SHORT).show()
-                }
-                ProfileMenuRow("设置", "通知、隐私与偏好设置", Icons.Rounded.Storefront, onSettings)
+                ProfileMenuRow(
+                    title = "消息中心",
+                    subtitle = if (hasMerchantReply) "商家已回复：${merchantReplyPreview.ifBlank { "请查看咨询消息" }}" else "查看通知、预约提醒和系统消息",
+                    icon = Icons.Rounded.NotificationsNone,
+                    showBadge = hasMerchantReply,
+                    onClick = onMessageCenter
+                )
+                ProfileMenuRow("设置", "通知、隐私与偏好设置", Icons.Rounded.Storefront, onClick = onSettings)
             }
         }
     }
@@ -5266,6 +5440,7 @@ private fun ProfileMenuRow(
     title: String,
     subtitle: String,
     icon: ImageVector,
+    showBadge: Boolean = false,
     onClick: () -> Unit
 ) {
     Card(
@@ -5293,6 +5468,11 @@ private fun ProfileMenuRow(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 Text(subtitle, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f), fontSize = 12.sp)
+            }
+            if (showBadge) {
+                Surface(shape = RoundedCornerShape(999.dp), color = Color(0xFFF25F86)) {
+                    Text("新", modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Icon(Icons.Rounded.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.34f))
         }
@@ -5995,7 +6175,7 @@ private fun FavoritesScreen(
 }
 
 @Composable
-private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onBook: () -> Unit) {
+private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onConsult: () -> Unit, onBook: () -> Unit) {
     val context = LocalContext.current
     val primary = Color(0xFFF25F86)
     Box(
@@ -6036,7 +6216,7 @@ private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onBook: () -> Un
         }
         StoreDetailBottomBar(
             primary = primary,
-            onConsult = { Toast.makeText(context, "咨询功能待接入", Toast.LENGTH_SHORT).show() },
+            onConsult = onConsult,
             onBook = onBook,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
@@ -6344,31 +6524,203 @@ private fun StoreDetailBottomBar(primary: Color, onConsult: () -> Unit, onBook: 
         }
     }
 }
+private fun chatTimeLabel(value: String): String {
+    if (value.isBlank()) return "刚刚"
+    return value.replace("T", " ").take(16)
+}
+
+@Composable
+private fun StoreChatScreen(
+    storeName: String,
+    messages: List<ChatMessageDto>,
+    loading: Boolean,
+    sending: Boolean,
+    errorMessage: String?,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    var input by rememberSaveable { mutableStateOf("") }
+    val primary = Color(0xFFF25F86)
+    val listState = rememberLazyListState()
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFFFAF7F6))
+            .imePadding()
+            .navigationBarsPadding()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回", tint = Color(0xFF222222))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(storeName.ifBlank { "门店咨询" }, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF222222), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("和商家实时沟通预约、款式和到店信息", fontSize = 12.sp, color = Color(0xFF776B70), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            TextButton(onClick = onRefresh, enabled = !loading) { Text("刷新") }
+        }
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (loading) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = primary, modifier = Modifier.size(24.dp))
+                    }
+                }
+            }
+            if (!errorMessage.isNullOrBlank()) {
+                item {
+                    Surface(shape = RoundedCornerShape(12.dp), color = Color(0xFFFFEEF2)) {
+                        Text(errorMessage, modifier = Modifier.padding(12.dp), color = primary, fontSize = 13.sp)
+                    }
+                }
+            }
+            if (!loading && messages.isEmpty()) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 60.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, tint = primary, modifier = Modifier.size(34.dp))
+                        Text("还没有消息", fontWeight = FontWeight.SemiBold, color = Color(0xFF222222))
+                        Text("可以直接向商家咨询款式、档期和到店细节", fontSize = 13.sp, color = Color(0xFF776B70), textAlign = TextAlign.Center)
+                    }
+                }
+            }
+            items(messages, key = { it.id }) { message ->
+                val isMine = message.senderRole == "customer"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
+                ) {
+                    Column(
+                        horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.widthIn(max = 290.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = if (isMine) primary else Color.White,
+                            shadowElevation = 1.dp
+                        ) {
+                            Text(
+                                message.body,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                color = if (isMine) Color.White else Color(0xFF222222),
+                                fontSize = 14.sp,
+                                lineHeight = 20.sp
+                            )
+                        }
+                        Text(if (isMine) "我 · ${chatTimeLabel(message.createdAt)}" else "商家 · ${chatTimeLabel(message.createdAt)}", fontSize = 11.sp, color = Color(0xFF8D8086))
+                    }
+                }
+            }
+        }
+
+        Surface(color = Color.White, shadowElevation = 2.dp) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("输入要咨询的内容") },
+                    minLines = 1,
+                    maxLines = 4,
+                    enabled = !sending
+                )
+                Button(
+                    onClick = {
+                        val body = input.trim()
+                        if (body.isNotEmpty()) {
+                            input = ""
+                            onSend(body)
+                        }
+                    },
+                    enabled = input.isNotBlank() && !sending,
+                    colors = ButtonDefaults.buttonColors(containerColor = primary)
+                ) {
+                    Text(if (sending) "发送中" else "发送", color = Color.White)
+                }
+            }
+        }
+    }
+}
 @Composable
 private fun BookingFormScreen(
-    store: Store,
     style: NailStyle,
     storeOptions: List<Store>,
     submitting: Boolean,
     errorMessage: String?,
-    onStoreChange: (String) -> Unit,
-    onSubmit: (String, String, String, String) -> Unit
+    onSubmit: (String, String, String, String, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
-    val selectedSlot = store.slots.firstOrNull() ?: store.nearestSlot.ifBlank { "今天 18:00" }
+    var selectedStoreId by remember { mutableStateOf("") }
+    val selectedStore = storeOptions.firstOrNull { it.id == selectedStoreId }
+    val slotOptions = remember(selectedStoreId, selectedStore?.slots, selectedStore?.nearestSlot) {
+        val fallback = selectedStore?.nearestSlot.orEmpty().ifBlank { "今天 18:00" }
+        ((selectedStore?.slots ?: emptyList()) + fallback)
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+    var selectedSlot by remember(selectedStoreId, slotOptions) { mutableStateOf(slotOptions.firstOrNull().orEmpty()) }
+    val canSubmit = selectedStore != null && selectedSlot.isNotBlank() && !submitting
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        item { SectionHeader("预约信息", "系统已带入款式和门店信息") }
+        item { SectionHeader("预约信息", "请选择预约门店和到店时间") }
         item { CompactValue("预约款式", style.name) }
-        item { CompactValue("预约门店", store.name) }
-        item { CompactValue("可选时间", selectedSlot) }
-        item { CompactValue("到店位置", store.address.ifBlank { store.area }) }
+        item {
+            BookingDropdownField(
+                label = "预约门店",
+                value = selectedStore?.name ?: "请选择门店",
+                options = storeOptions.map { it.name },
+                enabled = storeOptions.isNotEmpty(),
+                onSelected = { storeName ->
+                    storeOptions.firstOrNull { it.name == storeName }?.let { selectedStoreId = it.id }
+                }
+            )
+        }
+        item {
+            BookingDropdownField(
+                label = "可选时间",
+                value = if (selectedStore == null) "请先选择门店" else selectedSlot.ifBlank { "请选择时间" },
+                options = if (selectedStore == null) emptyList() else slotOptions,
+                enabled = selectedStore != null && slotOptions.isNotEmpty(),
+                onSelected = { selectedSlot = it }
+            )
+        }
         item {
             OutlinedTextField(value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("联系人姓名") })
         }
@@ -6389,14 +6741,66 @@ private fun BookingFormScreen(
             }
         }
         item {
-            TextButton(onClick = { storeOptions.firstOrNull { it.id != store.id }?.let { onStoreChange(it.id) } }) { Text("切换其他门店") }
-        }
-        item {
-            Button(onClick = { onSubmit(name, phone, note, selectedSlot) }, modifier = Modifier.fillMaxWidth(), enabled = !submitting) { Text(if (submitting) "提交中..." else "提交预约") }
+            Button(
+                onClick = {
+                    selectedStore?.let { store -> onSubmit(store.id, name, phone, note, selectedSlot) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = canSubmit
+            ) { Text(if (submitting) "提交中..." else "提交预约") }
         }
     }
 }
 
+@Composable
+private fun BookingDropdownField(
+    label: String,
+    value: String,
+    options: List<String>,
+    enabled: Boolean = true,
+    onSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled && options.isNotEmpty()) { expanded = true },
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                    Text(
+                        value,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text("⌄", color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.62f else 0.28f), fontSize = 20.sp)
+            }
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    onClick = {
+                        expanded = false
+                        onSelected(option)
+                    }
+                )
+            }
+        }
+    }
+}
 @Composable
 private fun BookingConfirmScreen(booking: BookingDto, loading: Boolean, errorMessage: String?, onConfirm: () -> Unit) {
     LazyColumn(
