@@ -815,13 +815,6 @@ fun NailMindApp() {
         stack.add(Screen.Tab(MainTab.Home))
     }
 
-    fun go(screen: Screen) {
-        if (screen is Screen.Tab) {
-            currentTab = screen.tab
-        }
-        stack.add(screen)
-    }
-
     fun trackEvent(
         eventName: String,
         styleId: String? = null,
@@ -846,6 +839,51 @@ fun NailMindApp() {
         }
     }
 
+    fun sourcePageFor(screen: Screen): String = when (screen) {
+        is Screen.Tab -> when (screen.tab) {
+            MainTab.Home -> "home"
+            MainTab.Styles -> "styles"
+            MainTab.TryOn -> "tryon"
+            MainTab.Booking -> "booking"
+            MainTab.Profile -> "profile"
+        }
+        Screen.Search -> "search"
+        is Screen.SearchResult -> "search_result"
+        Screen.Ranking -> "ranking"
+        is Screen.StyleDetail -> "style_detail"
+        is Screen.TryOnUpload -> "tryon_upload"
+        is Screen.TryOnProcessing -> "tryon_processing"
+        is Screen.TryOnResult -> "tryon_result"
+        Screen.TryOnHistory -> "tryon_history"
+        Screen.DiyDesigner -> "diy_designer"
+        Screen.Xiaomei -> "meimei_assistant"
+        Screen.Favorites -> "favorites"
+        Screen.BookingRecords -> "booking_records"
+        Screen.Reviews -> "reviews"
+        is Screen.StoreDetail -> "store_detail"
+        is Screen.BookingForm -> "booking_form"
+        is Screen.BookingConfirm -> "booking_confirm"
+        is Screen.BookingSuccess -> "booking_success"
+        Screen.Settings -> "settings"
+        Screen.Login -> "login"
+        Screen.Register -> "register"
+    }
+
+    fun go(screen: Screen, trackStyleNavigation: Boolean = true) {
+        if (trackStyleNavigation && screen is Screen.StyleDetail) {
+            trackEvent(
+                eventName = "style_click",
+                styleId = screen.styleId,
+                sourcePage = sourcePageFor(stack.lastOrNull() ?: Screen.Tab(currentTab)),
+                sourceChannel = "app_navigation"
+            )
+        }
+        if (screen is Screen.Tab) {
+            currentTab = screen.tab
+        }
+        stack.add(screen)
+    }
+
     fun openStyleDetail(
         styleId: String,
         sourcePage: String,
@@ -860,7 +898,7 @@ fun NailMindApp() {
             sourceChannel = sourceChannel,
             payload = payload
         )
-        go(Screen.StyleDetail(styleId))
+        go(Screen.StyleDetail(styleId), trackStyleNavigation = false)
     }
 
     fun refreshTryOnHistory() {
@@ -1947,7 +1985,7 @@ private fun loadXiaomeiHistory(context: Context): List<XiaomeiChatSession> {
 }
 
 private fun saveXiaomeiSession(context: Context, messages: List<XiaomeiChatMessage>) {
-    val storableMessages = messages.filter { it.text.isNotBlank() || !it.imagePath.isNullOrBlank() }
+    val storableMessages = messages.filter { !it.isError && (it.text.isNotBlank() || !it.imagePath.isNullOrBlank()) }
     if (storableMessages.isEmpty()) return
     val firstUser = storableMessages.firstOrNull { it.role == XiaomeiChatRole.User }
     val title = firstUser?.text?.trim()
@@ -2082,13 +2120,13 @@ private fun XiaomeiAssistantSheet(
                 }
             }.onSuccess(::addAssistantResponse)
                 .onFailure { error ->
-                    messages.add(
-                        XiaomeiChatMessage(
-                            role = XiaomeiChatRole.Assistant,
-                            text = error.message ?: "小美暂时没处理好，换个说法或重新发一次照片。",
-                            isError = true
-                        )
-                    )
+                    val message = error.message.orEmpty()
+                    val userFacing = when {
+                        message.contains("connection abort", ignoreCase = true) -> "刚才网络断了一下，可以直接再发一次。"
+                        message.contains("timeout", ignoreCase = true) -> "这次分析等太久了，可以换张更清晰的照片再试。"
+                        else -> "小美暂时没处理好，换个说法或重新发一次照片。"
+                    }
+                    Toast.makeText(context, userFacing, Toast.LENGTH_SHORT).show()
                 }
             onLoadingChange(false)
         }
