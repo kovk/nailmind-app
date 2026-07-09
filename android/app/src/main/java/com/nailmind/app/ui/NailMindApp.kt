@@ -864,6 +864,7 @@ fun NailMindApp() {
         is Screen.BookingForm -> "booking_form"
         is Screen.BookingConfirm -> "booking_confirm"
         is Screen.BookingSuccess -> "booking_success"
+        is Screen.Chat -> "chat"
         Screen.Settings -> "settings"
         Screen.Login -> "login"
         Screen.Register -> "register"
