@@ -358,7 +358,10 @@ internal data class DetectedHandTraits(
     val skinTone: String = "",
     val skinUndertone: String = "",
     val handShape: String = "",
-    val nailBed: String = ""
+    val nailBed: String = "",
+    val colorHarmonyVerdict: String = "",
+    val colorHarmonyReason: String = "",
+    val colorHarmonySuggestion: String = ""
 )
 
 internal data class TryOnAnalysisContext(
@@ -761,9 +764,19 @@ internal fun tryOnAnalysisContext(
         skinTone = detectedTraits.firstTrait("skinTone", "skin_tone", "skin", "tone"),
         skinUndertone = detectedTraits.firstTrait("skinUndertone", "skin_undertone", "undertone"),
         handShape = detectedTraits.firstTrait("handShape", "hand_shape", "handType", "hand_type"),
-        nailBed = detectedTraits.firstTrait("nailBed", "nail_bed")
+        nailBed = detectedTraits.firstTrait("nailBed", "nail_bed"),
+        colorHarmonyVerdict = detectedTraits.firstTrait("colorHarmonyVerdict", "color_harmony_verdict"),
+        colorHarmonyReason = detectedTraits.firstTrait("colorHarmonyReason", "color_harmony_reason"),
+        colorHarmonySuggestion = detectedTraits.firstTrait("colorHarmonySuggestion", "color_harmony_suggestion")
     )
 )
+
+internal fun tryOnHistoryAnalysisContext(item: TryOnHistoryItemDto): TryOnAnalysisContext =
+    tryOnAnalysisContext(
+        selectedLength = item.selectedLength,
+        selectedShape = item.selectedShape,
+        detectedTraits = item.detectedTraits.orEmpty()
+    )
 
 private fun TryOnJobDto.toAnalysisContext(): TryOnAnalysisContext = tryOnAnalysisContext(
     selectedLength = selectedLength,
@@ -801,11 +814,20 @@ internal fun buildTryOnAnalysis(
     val detectedHand = context.traits.handShape
     val detectedNailBed = context.traits.nailBed
     val styleText = (listOf(styleName) + tags).joinToString(" ")
+    val modelHarmonyVerdict = context.traits.colorHarmonyVerdict
+    val modelHarmonyReason = context.traits.colorHarmonyReason
+    val modelHarmonySuggestion = context.traits.colorHarmonySuggestion
     val targetSkin = skinTone.trim().takeUnless { it.isBlank() || it == "通用" }
     val detectedUndertone = skinUndertone(context.traits.skinUndertone.ifBlank { detectedSkin })
     val targetUndertone = targetSkin?.let(::skinUndertone) ?: SkinUndertone.Unknown
     val colorUndertone = styleColorUndertone(styleText)
     val colorHarmony = when {
+        modelHarmonyReason.isNotBlank() -> buildString {
+            append("大模型判断")
+            if (modelHarmonyVerdict.isNotBlank()) append("：$modelHarmonyVerdict")
+            append("。$modelHarmonyReason")
+            if (modelHarmonySuggestion.isNotBlank()) append(" 建议：$modelHarmonySuggestion")
+        }
         detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown && detectedUndertone == targetUndertone ->
             "本次识别为$detectedSkin，款式标注适合$targetSkin，色温方向一致，整体协调。"
         detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown ->
@@ -1099,10 +1121,7 @@ fun NailMindApp() {
                     stage = item.source,
                     progress = 100,
                     status = "completed",
-                    analysisContext = tryOnAnalysisContext(
-                        selectedLength = item.selectedLength,
-                        selectedShape = item.selectedShape
-                    )
+                    analysisContext = tryOnHistoryAnalysisContext(item)
                 )
                 go(Screen.TryOnResult(item.styleId, resultJobId))
             }.onFailure { error ->
@@ -6386,19 +6405,13 @@ private fun TryOnResultScreen(
         item {
             ResultCanvas(style = style, resultBitmap = resultBitmap)
         }
+        item {
+            Text(style.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
         if (resultBitmap != null) {
             item {
                 TryOnAnalysisCard(analysis)
             }
-        }
-        item {
-            Text(style.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-        item {
-            Text(
-                if (resultStatus == "completed" || resultStatus.isBlank()) "试戴图已生成，可查看上手效果并决定是否预约同款。" else "试戴结果暂不可用，请重新上传手部照片后再试。",
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
-            )
         }
         item {
             OutlinedButton(

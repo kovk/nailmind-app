@@ -199,6 +199,7 @@ data class TryOnHistoryItemDto(
     val source: String,
     val selectedLength: String,
     val selectedShape: String,
+    val detectedTraits: Map<String, String>? = null,
     val createdAt: String
 )
 
