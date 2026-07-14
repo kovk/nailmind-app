@@ -16,7 +16,8 @@ data class RegisterRequest(
 data class AuthUserDto(
     val name: String,
     val email: String,
-    val preferences: List<String> = emptyList()
+    val preferences: List<String> = emptyList(),
+    val needsStyleProfileOnboarding: Boolean = false
 )
 
 data class AuthResponse(
@@ -30,6 +31,33 @@ data class AuthMeResponse(
 
 data class StatusResponse(
     val status: String
+)
+
+data class StyleProfileTaxonomyDto(
+    val nailShapes: List<String> = emptyList(),
+    val colorFamilies: List<String> = emptyList(),
+    val styles: List<String> = emptyList(),
+    val effects: List<String> = emptyList(),
+    val scenes: List<String> = emptyList()
+)
+
+data class StyleProfileDto(
+    val nailShapes: List<String> = emptyList(),
+    val colorFamilies: List<String> = emptyList(),
+    val styles: List<String> = emptyList(),
+    val effects: List<String> = emptyList(),
+    val scenes: List<String> = emptyList(),
+    val onboardingCompleted: Boolean = false,
+    val updatedAt: String? = null,
+    val taxonomy: StyleProfileTaxonomyDto? = null
+)
+
+data class UpdateStyleProfileRequest(
+    val nailShapes: List<String> = emptyList(),
+    val colorFamilies: List<String> = emptyList(),
+    val styles: List<String> = emptyList(),
+    val effects: List<String> = emptyList(),
+    val scenes: List<String> = emptyList()
 )
 
 data class TrackEventRequest(
@@ -51,7 +79,36 @@ data class TrackEventResponse(
 data class HomeResponse(
     val hotKeywords: List<String>,
     val recommended: List<StyleDto>,
-    val hot: List<StyleDto>
+    val hot: List<StyleDto>,
+    val sceneSections: Map<String, List<StyleDto>?>? = emptyMap(),
+    val sceneStyles: Map<String, List<StyleDto>?>? = emptyMap(),
+    val ranking: List<StyleRankingItemDto> = emptyList(),
+    val heatRanking: List<StyleRankingItemDto> = emptyList(),
+    val tryOnRanking: List<StyleRankingItemDto> = emptyList(),
+    val bookingRanking: List<StyleRankingItemDto> = emptyList(),
+    val trends: List<StyleRankingItemDto> = emptyList(),
+    val trendTopics: List<TrendTopicDto> = emptyList(),
+    val trendKeywords: List<String> = emptyList(),
+    val trendsUpdatedAt: String = ""
+)
+
+data class TrendTopicDto(
+    val id: String = "",
+    val name: String = "",
+    val summary: String = "",
+    val styles: List<StyleDto> = emptyList(),
+    val updatedAt: String = ""
+)
+
+data class StyleRankingItemDto(
+    val rank: Int = 0,
+    val score: Int = 0,
+    val impressions: Int = 0,
+    val clicks: Int = 0,
+    val favorites: Int = 0,
+    val tryOns: Int = 0,
+    val bookings: Int = 0,
+    val style: StyleDto
 )
 
 data class StyleTagGroupsDto(
@@ -69,6 +126,7 @@ data class StyleDto(
     val nailType: String = "",
     val skinTone: String = "",
     val tags: List<String> = emptyList(),
+    val displayTags: List<String>? = emptyList(),
     val tagGroups: StyleTagGroupsDto? = null,
     val colors: List<String> = emptyList(),
     val imageUrl: String? = null,
@@ -87,7 +145,14 @@ data class SearchResponse(
 data class MeimeiChatRequest(
     val message: String,
     val handImageUrl: String? = null,
-    val handImageKey: String? = null
+    val handImageKey: String? = null,
+    val lastHandAnalysis: MeimeiHandAnalysisDto? = null,
+    val history: List<MeimeiChatHistoryItemDto> = emptyList()
+)
+
+data class MeimeiChatHistoryItemDto(
+    val role: String,
+    val content: String
 )
 
 data class MeimeiEntryDto(
@@ -99,11 +164,18 @@ data class MeimeiEntryDto(
 data class MeimeiHandAnalysisDto(
     val hasHand: Boolean = false,
     val skinTone: String = "",
+    val skinUndertone: String = "",
     val handShape: String = "",
+    val fingerProportion: String = "",
+    val nailBed: String = "",
+    val visibleNails: Int = 0,
+    val imageQuality: String = "",
     val recommendedShapes: List<String> = emptyList(),
     val recommendedColors: List<String> = emptyList(),
+    val recommendedStyles: List<String> = emptyList(),
     val reason: String = "",
-    val confidence: Double = 0.0
+    val confidence: Double = 0.0,
+    val status: String = ""
 )
 
 data class MeimeiRecommendationDto(
@@ -134,6 +206,14 @@ fun MeimeiRecommendationDto.normalized(): MeimeiRecommendationDto = copy(
 fun MeimeiChatResponse.normalized(): MeimeiChatResponse = copy(
     recommendations = recommendations.map { it.normalized() }
 )
+
+sealed interface MeimeiStreamEvent {
+    data class Status(val stage: String, val message: String) : MeimeiStreamEvent
+    data class Delta(val text: String) : MeimeiStreamEvent
+    data class Result(val response: MeimeiChatResponse) : MeimeiStreamEvent
+    data class Error(val message: String) : MeimeiStreamEvent
+    data object Done : MeimeiStreamEvent
+}
 
 data class StyleDetailResponse(
     val style: StyleDto,
@@ -203,7 +283,20 @@ data class TryOnHistoryItemDto(
     val createdAt: String
 )
 
-fun StyleDto.normalized(): StyleDto = copy(imageUrl = AppConfig.normalizeMediaUrl(imageUrl))
+fun StyleDto.normalized(): StyleDto = StyleDto(
+    id = id.orEmpty(),
+    name = name.orEmpty(),
+    vibe = vibe.orEmpty(),
+    price = price.orEmpty(),
+    nailType = nailType.orEmpty(),
+    skinTone = skinTone.orEmpty(),
+    tags = tags.orEmpty(),
+    displayTags = displayTags.orEmpty(),
+    tagGroups = tagGroups,
+    colors = colors.orEmpty(),
+    imageUrl = AppConfig.normalizeMediaUrl(imageUrl),
+    tryOnStyleId = tryOnStyleId
+)
 
 fun HandImageDto.normalized(): HandImageDto = copy(imageUrl = AppConfig.normalizeMediaUrl(imageUrl).orEmpty())
 
@@ -252,11 +345,25 @@ data class TryOnJobDto(
     val createdAt: String,
     val updatedAt: String,
     val completedAt: String? = null,
-    val resultImageUrl: String? = null
+    val resultImageUrl: String? = null,
+    val results: List<TryOnJobResultDto> = emptyList(),
+    val allResultsReady: Boolean = true,
+    val firstResultDurationMs: Int? = null
 )
 
 fun TryOnJobDto.normalized(): TryOnJobDto = copy(
-    resultImageUrl = AppConfig.normalizeMediaUrl(resultImageUrl)
+    resultImageUrl = AppConfig.normalizeMediaUrl(resultImageUrl),
+    results = results.map { it.copy(resultImageUrl = AppConfig.normalizeMediaUrl(it.resultImageUrl)) }
+)
+
+data class TryOnJobResultDto(
+    val provider: String,
+    val label: String,
+    val status: String,
+    val resultImageUrl: String? = null,
+    val durationMs: Int? = null,
+    val errorMessage: String? = null,
+    val completedAt: String? = null
 )
 
 data class StoreDto(

@@ -1,16 +1,20 @@
 ﻿package com.nailmind.app.data.api
 
 import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.PUT
 import retrofit2.http.Url
 import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 import retrofit2.http.Body
+import retrofit2.http.Headers
+import retrofit2.http.Streaming
 
 interface NailMindApiService {
     @POST("api/auth/register")
@@ -24,6 +28,15 @@ interface NailMindApiService {
 
     @POST("api/auth/logout")
     suspend fun logout(): StatusResponse
+
+    @GET("api/users/style-profile")
+    suspend fun styleProfile(): StyleProfileDto
+
+    @PUT("api/users/style-profile")
+    suspend fun updateStyleProfile(@Body request: UpdateStyleProfileRequest): StyleProfileDto
+
+    @POST("api/users/style-profile/skip")
+    suspend fun skipStyleProfile(): StyleProfileDto
 
     @POST("api/events")
     suspend fun trackEvent(@Body request: TrackEventRequest): TrackEventResponse
@@ -39,6 +52,11 @@ interface NailMindApiService {
 
     @POST("api/assistant/meimei/chat")
     suspend fun meimeiChat(@Body request: MeimeiChatRequest): MeimeiChatResponse
+
+    @Streaming
+    @Headers("Accept: text/event-stream")
+    @POST("api/assistant/meimei/chat/stream")
+    suspend fun meimeiChatStream(@Body request: MeimeiChatRequest): Response<ResponseBody>
 
     @GET("api/styles/{styleId}")
     suspend fun styleDetail(@Path("styleId") styleId: String): StyleDetailResponse

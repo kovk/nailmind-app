@@ -4,7 +4,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.io.IOException
 import com.nailmind.app.data.config.AppConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 
 class NailMindRepository(
     private val service: NailMindApiService = NailMindApiClient.service
@@ -18,6 +23,13 @@ class NailMindRepository(
     suspend fun authMe(): AuthMeResponse = service.authMe()
 
     suspend fun logout(): StatusResponse = service.logout()
+
+    suspend fun styleProfile(): StyleProfileDto = service.styleProfile()
+
+    suspend fun updateStyleProfile(request: UpdateStyleProfileRequest): StyleProfileDto =
+        service.updateStyleProfile(request)
+
+    suspend fun skipStyleProfile(): StyleProfileDto = service.skipStyleProfile()
 
     suspend fun trackEvent(
         eventName: String,
@@ -41,12 +53,7 @@ class NailMindRepository(
         )
     )
 
-    suspend fun home(): HomeResponse = service.home().let { response ->
-        response.copy(
-            recommended = response.recommended.map { it.normalized() },
-            hot = response.hot.map { it.normalized() },
-        )
-    }
+    suspend fun home(): HomeResponse = service.home().normalized()
 
     suspend fun styles(tag: String? = null): StylesResponse = service.styles(tag).let { response ->
         response.copy(items = response.items.map { it.normalized() })
@@ -56,8 +63,83 @@ class NailMindRepository(
         response.copy(items = response.items.map { it.normalized() })
     }
 
-    suspend fun meimeiChat(message: String, handImageUrl: String? = null, handImageKey: String? = null): MeimeiChatResponse =
-        service.meimeiChat(MeimeiChatRequest(message = message, handImageUrl = handImageUrl, handImageKey = handImageKey)).normalized()
+    suspend fun meimeiChat(
+        message: String,
+        handImageUrl: String? = null,
+        handImageKey: String? = null,
+        lastHandAnalysis: MeimeiHandAnalysisDto? = null,
+        history: List<MeimeiChatHistoryItemDto> = emptyList()
+    ): MeimeiChatResponse = service.meimeiChat(
+        MeimeiChatRequest(
+            message = message,
+            handImageUrl = handImageUrl,
+            handImageKey = handImageKey,
+            lastHandAnalysis = lastHandAnalysis,
+            history = history
+        )
+    ).normalized()
+
+    fun meimeiChatStream(
+        message: String,
+        handImageUrl: String? = null,
+        handImageKey: String? = null,
+        lastHandAnalysis: MeimeiHandAnalysisDto? = null,
+        history: List<MeimeiChatHistoryItemDto> = emptyList()
+    ): Flow<MeimeiStreamEvent> = flow {
+        val response = service.meimeiChatStream(
+            MeimeiChatRequest(
+                message = message,
+                handImageUrl = handImageUrl,
+                handImageKey = handImageKey,
+                lastHandAnalysis = lastHandAnalysis,
+                history = history
+            )
+        )
+        if (!response.isSuccessful) {
+            val errorBody = response.errorBody()?.string().orEmpty()
+            throw IOException("小美流式请求失败: HTTP ${response.code()} $errorBody")
+        }
+        val body = response.body() ?: throw IOException("小美流式响应为空")
+        val parser = MeimeiSseParser()
+        body.source().use { source ->
+            var eventName = "message"
+            val data = StringBuilder()
+
+            while (!source.exhausted()) {
+                val line = source.readUtf8Line() ?: break
+                when {
+                    line.isBlank() -> {
+                        parser.parse(eventName, data.toString())?.let { event ->
+                            emit(
+                                if (event is MeimeiStreamEvent.Result) {
+                                    event.copy(response = event.response.normalized())
+                                } else {
+                                    event
+                                }
+                            )
+                        }
+                        eventName = "message"
+                        data.clear()
+                    }
+                    line.startsWith("event:") -> eventName = line.substringAfter(':').trim()
+                    line.startsWith("data:") -> {
+                        if (data.isNotEmpty()) data.append('\n')
+                        data.append(line.substringAfter(':').trimStart())
+                    }
+                }
+            }
+
+            parser.parse(eventName, data.toString())?.let { event ->
+                emit(
+                    if (event is MeimeiStreamEvent.Result) {
+                        event.copy(response = event.response.normalized())
+                    } else {
+                        event
+                    }
+                )
+            }
+        }
+    }.flowOn(Dispatchers.IO)
 
     suspend fun styleDetail(styleId: String): StyleDetailResponse = service.styleDetail(styleId).let { response ->
         response.copy(style = response.style.normalized())
@@ -193,3 +275,29 @@ class NailMindRepository(
 
     suspend fun settings(): SettingsResponse = service.settings()
 }
+
+internal fun HomeResponse.normalized(): HomeResponse {
+    val legacySceneStyles = sceneStyles.normalizeStyles()
+    val currentSceneSections = sceneSections.normalizeStyles()
+
+    return HomeResponse(
+        hotKeywords = hotKeywords.orEmpty(),
+        recommended = recommended.orEmpty().map { it.normalized() },
+        hot = hot.orEmpty().map { it.normalized() },
+        sceneSections = legacySceneStyles + currentSceneSections,
+        sceneStyles = legacySceneStyles,
+        ranking = ranking.orEmpty(),
+        heatRanking = heatRanking.orEmpty(),
+        tryOnRanking = tryOnRanking.orEmpty(),
+        bookingRanking = bookingRanking.orEmpty(),
+        trends = trends.orEmpty(),
+        trendTopics = trendTopics.orEmpty(),
+        trendKeywords = trendKeywords.orEmpty(),
+        trendsUpdatedAt = trendsUpdatedAt.orEmpty()
+    )
+}
+
+private fun Map<String, List<StyleDto>?>?.normalizeStyles(): Map<String, List<StyleDto>> =
+    orEmpty()
+        .mapValues { (_, styles) -> styles.orEmpty().map { it.normalized() } }
+        .filterValues { it.isNotEmpty() }
