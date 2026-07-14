@@ -157,6 +157,7 @@ import com.nailmind.app.data.api.StoreDto
 import com.nailmind.app.data.api.StyleTagGroupsDto
 import com.nailmind.app.data.api.StyleDto
 import com.nailmind.app.data.api.TryOnHistoryItemDto
+import com.nailmind.app.data.api.TryOnJobDto
 import com.nailmind.app.data.config.AppConfig
 import com.nailmind.app.ui.theme.RoseAccent
 import com.nailmind.app.ui.theme.RoseTint
@@ -333,9 +334,42 @@ private data class TryOnStatus(
     val stage: String = "",
     val progress: Int = 0,
     val status: String = "",
+    val analysisContext: TryOnAnalysisContext = TryOnAnalysisContext(),
     val errorMessage: String? = null
 )
 
+internal enum class TryOnLength(val label: String, val isShort: Boolean = false) {
+    NaturalShort("自然短款", true),
+    Medium("自然中长款"),
+    Long("修长款"),
+    Unknown("")
+}
+
+internal enum class TryOnShape(val label: String, val elongates: Boolean = false, val widens: Boolean = false) {
+    Squoval("方圆甲"),
+    Round("圆甲"),
+    Oval("椭圆甲", elongates = true),
+    Almond("杏仁甲", elongates = true),
+    Square("方甲", widens = true),
+    Unknown("")
+}
+
+internal data class DetectedHandTraits(
+    val skinTone: String = "",
+    val handShape: String = ""
+)
+
+internal data class TryOnAnalysisContext(
+    val length: TryOnLength = TryOnLength.Unknown,
+    val shape: TryOnShape = TryOnShape.Unknown,
+    val traits: DetectedHandTraits = DetectedHandTraits()
+)
+
+internal data class TryOnAnalysis(
+    val colorHarmony: String,
+    val shapeAndLength: String,
+    val outfitAdvice: String
+)
 private const val tryOnNotificationChannelId = "tryon_updates"
 
 private fun ensureTryOnNotificationChannel(context: Context) {
@@ -694,6 +728,119 @@ private fun stageLabel(stage: String): String = when (stage) {
     else -> stage.ifBlank { "排队中" }
 }
 
+private fun Map<String, String>.firstTrait(vararg keys: String): String = keys
+    .firstNotNullOfOrNull { key -> get(key)?.trim()?.takeIf { it.isNotBlank() } }
+    .orEmpty()
+
+private fun tryOnLength(value: String): TryOnLength = when (value) {
+    "natural_short", "short" -> TryOnLength.NaturalShort
+    "medium" -> TryOnLength.Medium
+    "long" -> TryOnLength.Long
+    else -> TryOnLength.Unknown
+}
+
+private fun tryOnShape(value: String): TryOnShape = when (value) {
+    "squoval" -> TryOnShape.Squoval
+    "round" -> TryOnShape.Round
+    "oval" -> TryOnShape.Oval
+    "almond" -> TryOnShape.Almond
+    "square" -> TryOnShape.Square
+    else -> TryOnShape.Unknown
+}
+
+internal fun tryOnAnalysisContext(
+    selectedLength: String,
+    selectedShape: String,
+    detectedTraits: Map<String, String> = emptyMap()
+): TryOnAnalysisContext = TryOnAnalysisContext(
+    length = tryOnLength(selectedLength),
+    shape = tryOnShape(selectedShape),
+    traits = DetectedHandTraits(
+        skinTone = detectedTraits.firstTrait("skinTone", "skin_tone", "skin", "tone"),
+        handShape = detectedTraits.firstTrait("handShape", "hand_shape", "handType", "hand_type")
+    )
+)
+
+private fun TryOnJobDto.toAnalysisContext(): TryOnAnalysisContext = tryOnAnalysisContext(
+    selectedLength = selectedLength,
+    selectedShape = selectedShape,
+    detectedTraits = detectedTraits.orEmpty()
+)
+
+private enum class SkinUndertone { Warm, Cool, Neutral, Unknown }
+
+private fun skinUndertone(value: String): SkinUndertone = when {
+    "冷" in value -> SkinUndertone.Cool
+    listOf("暖", "黄", "小麦").any(value::contains) -> SkinUndertone.Warm
+    listOf("中性", "自然").any(value::contains) -> SkinUndertone.Neutral
+    else -> SkinUndertone.Unknown
+}
+
+private fun shapeNeedsElongation(handShape: String): Boolean =
+    listOf("宽", "短", "肉", "圆", "甲床短").any(handShape::contains)
+
+internal fun buildTryOnAnalysis(
+    styleName: String,
+    nailType: String,
+    skinTone: String,
+    tags: List<String>,
+    context: TryOnAnalysisContext
+): TryOnAnalysis {
+    val detectedSkin = context.traits.skinTone
+    val detectedHand = context.traits.handShape
+    val targetSkin = skinTone.trim().takeUnless { it.isBlank() || it == "通用" }
+    val detectedUndertone = skinUndertone(detectedSkin)
+    val targetUndertone = targetSkin?.let(::skinUndertone) ?: SkinUndertone.Unknown
+    val colorHarmony = when {
+        detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown && detectedUndertone == targetUndertone ->
+            "本次识别为$detectedSkin，款式标注适合$targetSkin，色温方向一致，整体协调。"
+        detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown ->
+            "本次识别为$detectedSkin，而款式主要面向$targetSkin，色温存在反差，协调度一般；可换成更贴近肤色色温的款式。"
+        detectedSkin.isNotBlank() && targetSkin != null ->
+            "已识别为$detectedSkin，但款式的肤色标签为$targetSkin，现有标签不足以可靠判断是否协调，建议以自然光下的试戴效果为准。"
+        detectedSkin.isNotBlank() ->
+            "已识别为$detectedSkin，但款式没有明确的适配肤色标签，暂不能可靠判断是否协调，建议在自然光下确认真实色差。"
+        targetSkin != null ->
+            "这款配色主要面向$targetSkin，但本次没有识别到可靠肤色，暂不能判断是否协调。"
+        else ->
+            "本次没有取得可靠肤色和款式适配标签，暂不能判断是否协调；建议在自然光下查看真实色差。"
+    }
+
+    val lengthLabel = context.length.label
+    val shapeLabel = context.shape.label.ifBlank { nailType.trim().ifBlank { "自然甲型" } }
+    val lengthContext = lengthLabel.takeIf { it.isNotBlank() }?.let { "$it、" }.orEmpty()
+    val shapeAndLength = when {
+        detectedHand.isBlank() ->
+            "本次采用$lengthContext$shapeLabel，但没有识别到可靠手型，暂不能判断是否适合；可优先选择不过度超出指尖的长度。"
+        shapeNeedsElongation(detectedHand) && context.shape.widens && context.length.isShort ->
+            "识别到$detectedHand，本次$lengthContext${shapeLabel}会强化横向宽度，适配度一般；更建议中等长度的椭圆或杏仁甲。"
+        shapeNeedsElongation(detectedHand) && context.shape.elongates ->
+            "识别到$detectedHand，本次$lengthContext${shapeLabel}能延伸纵向线条，甲型和长度适合当前手型。"
+        shapeNeedsElongation(detectedHand) ->
+            "识别到$detectedHand，本次$lengthContext${shapeLabel}修饰力度有限，适配度一般；可适当增加长度或改为偏椭圆甲型。"
+        else ->
+            "识别到$detectedHand，本次$lengthContext${shapeLabel}不会明显破坏手指比例，甲型和长度整体适合。"
+    }
+
+    val styleText = (listOf(styleName) + tags).joinToString(" ")
+    val outfitAdvice = when {
+        listOf("通勤", "职场").any(styleText::contains) ->
+            "适合通勤穿搭，可搭配白衬衫、针织衫或浅色西装，用简洁首饰呼应甲面的精致感。"
+        listOf("日常", "法式", "裸", "奶茶").any(styleText::contains) ->
+            "适合日常穿搭，推荐米白针织、牛仔或低饱和基础款，整体会显得清爽耐看。"
+        listOf("酷", "黑", "猫眼", "镜面", "金属").any(styleText::contains) ->
+            "适合酷感或晚间穿搭，可搭配黑灰色服装、皮质单品和银色配饰，突出光泽与层次。"
+        listOf("甜美", "粉", "花", "手绘").any(styleText::contains) ->
+            "适合甜美约会穿搭，可搭配浅色针织、连衣裙和小体量配饰，让整体更轻盈。"
+        listOf("中式", "新中式", "红", "金").any(styleText::contains) ->
+            "适合新中式或节庆穿搭，可搭配缎面、盘扣元素和金色配饰，强化精致氛围。"
+        else ->
+            "适合简约日常穿搭，选择与甲面同色系的上衣或配饰，就能让整体造型更统一。"
+    }
+
+    return TryOnAnalysis(colorHarmony, shapeAndLength, outfitAdvice)
+}
+
 @OptIn(ExperimentalAnimationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun NailMindApp() {
@@ -933,7 +1080,11 @@ fun NailMindApp() {
                     styleName = item.styleName,
                     stage = item.source,
                     progress = 100,
-                    status = "completed"
+                    status = "completed",
+                    analysisContext = tryOnAnalysisContext(
+                        selectedLength = item.selectedLength,
+                        selectedShape = item.selectedShape
+                    )
                 )
                 go(Screen.TryOnResult(item.styleId, resultJobId))
             }.onFailure { error ->
@@ -958,6 +1109,7 @@ fun NailMindApp() {
                             stage = job.stage,
                             progress = job.progress,
                             status = job.status,
+                            analysisContext = job.toAnalysisContext(),
                             errorMessage = job.errorMessage
                         )
                         when (job.status) {
@@ -1028,6 +1180,7 @@ fun NailMindApp() {
                     stage = job.stage,
                     progress = job.progress,
                     status = job.status,
+                    analysisContext = job.toAnalysisContext(),
                     errorMessage = job.errorMessage
                 )
                 tryOnSubmitting = false
@@ -1071,6 +1224,7 @@ fun NailMindApp() {
                     stage = job.stage,
                     progress = job.progress,
                     status = job.status,
+                    analysisContext = job.toAnalysisContext(),
                     errorMessage = job.errorMessage
                 )
                 tryOnSubmitting = false
@@ -1728,6 +1882,7 @@ fun NailMindApp() {
                     favorite = favorites.contains(screen.styleId),
                     resultStatus = tryOnStatus.status,
                     resultBitmap = latestTryOnBitmap,
+                    analysisContext = tryOnStatus.analysisContext,
                     onOpenStyle = { openStyleDetail(screen.styleId, "tryon_result", "result_style_button") },
                     onRetake = { go(Screen.TryOnUpload(screen.styleId)) },
                     onToggleFavorite = { toggleFavorite(screen.styleId) },
@@ -5937,7 +6092,6 @@ private fun StyleFilterOption(
 @Composable
 private fun StyleFilterResultItem(style: NailStyle, onClick: () -> Unit) {
     val tagSummary = buildList {
-        addAll(style.displayTags)
         addAll(style.tags)
         addAll(style.tagGroups.vibes)
         addAll(style.tagGroups.effects)
@@ -6192,12 +6346,20 @@ private fun TryOnResultScreen(
     favorite: Boolean,
     resultStatus: String,
     resultBitmap: Bitmap?,
+    analysisContext: TryOnAnalysisContext,
     onOpenStyle: () -> Unit,
     onRetake: () -> Unit,
     onToggleFavorite: () -> Unit,
     onBook: () -> Unit,
     onSaveImage: () -> Unit
 ) {
+    val analysis = buildTryOnAnalysis(
+        styleName = style.name,
+        nailType = style.nailType,
+        skinTone = style.skinTone,
+        tags = style.tags + style.tagGroups.vibes + style.tagGroups.effects + style.tagGroups.scenes,
+        context = analysisContext
+    )
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(20.dp),
@@ -6205,6 +6367,11 @@ private fun TryOnResultScreen(
     ) {
         item {
             ResultCanvas(style = style, resultBitmap = resultBitmap)
+        }
+        if (resultBitmap != null) {
+            item {
+                TryOnAnalysisCard(analysis)
+            }
         }
         item {
             Text(style.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -6239,6 +6406,64 @@ private fun TryOnResultScreen(
                 ) { Text("保存图片") }
             }
         }
+    }
+}
+
+@Composable
+private fun TryOnAnalysisCard(analysis: TryOnAnalysis) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    "试戴适配分析",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            TryOnAnalysisItem("颜色与肤色", analysis.colorHarmony)
+            TryOnAnalysisItem("甲型与长度", analysis.shapeAndLength)
+            TryOnAnalysisItem("穿搭建议", analysis.outfitAdvice)
+        }
+    }
+}
+
+@Composable
+private fun TryOnAnalysisItem(title: String, content: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        Text(
+            title,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            content,
+            fontSize = 13.sp,
+            lineHeight = 20.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+        )
     }
 }
 
