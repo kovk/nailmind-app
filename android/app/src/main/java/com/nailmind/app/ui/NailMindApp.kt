@@ -356,7 +356,9 @@ internal enum class TryOnShape(val label: String, val elongates: Boolean = false
 
 internal data class DetectedHandTraits(
     val skinTone: String = "",
-    val handShape: String = ""
+    val skinUndertone: String = "",
+    val handShape: String = "",
+    val nailBed: String = ""
 )
 
 internal data class TryOnAnalysisContext(
@@ -757,7 +759,9 @@ internal fun tryOnAnalysisContext(
     shape = tryOnShape(selectedShape),
     traits = DetectedHandTraits(
         skinTone = detectedTraits.firstTrait("skinTone", "skin_tone", "skin", "tone"),
-        handShape = detectedTraits.firstTrait("handShape", "hand_shape", "handType", "hand_type")
+        skinUndertone = detectedTraits.firstTrait("skinUndertone", "skin_undertone", "undertone"),
+        handShape = detectedTraits.firstTrait("handShape", "hand_shape", "handType", "hand_type"),
+        nailBed = detectedTraits.firstTrait("nailBed", "nail_bed")
     )
 )
 
@@ -776,6 +780,13 @@ private fun skinUndertone(value: String): SkinUndertone = when {
     else -> SkinUndertone.Unknown
 }
 
+private fun styleColorUndertone(value: String): SkinUndertone = when {
+    listOf("蓝", "紫", "银", "灰", "冷调").any(value::contains) -> SkinUndertone.Cool
+    listOf("红", "橙", "黄", "金", "棕", "奶茶", "豆沙", "暖调").any(value::contains) -> SkinUndertone.Warm
+    listOf("透明", "中性", "裸色").any(value::contains) -> SkinUndertone.Neutral
+    else -> SkinUndertone.Unknown
+}
+
 private fun shapeNeedsElongation(handShape: String): Boolean =
     listOf("宽", "短", "肉", "圆", "甲床短").any(handShape::contains)
 
@@ -788,14 +799,21 @@ internal fun buildTryOnAnalysis(
 ): TryOnAnalysis {
     val detectedSkin = context.traits.skinTone
     val detectedHand = context.traits.handShape
+    val detectedNailBed = context.traits.nailBed
+    val styleText = (listOf(styleName) + tags).joinToString(" ")
     val targetSkin = skinTone.trim().takeUnless { it.isBlank() || it == "通用" }
-    val detectedUndertone = skinUndertone(detectedSkin)
+    val detectedUndertone = skinUndertone(context.traits.skinUndertone.ifBlank { detectedSkin })
     val targetUndertone = targetSkin?.let(::skinUndertone) ?: SkinUndertone.Unknown
+    val colorUndertone = styleColorUndertone(styleText)
     val colorHarmony = when {
         detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown && detectedUndertone == targetUndertone ->
             "本次识别为$detectedSkin，款式标注适合$targetSkin，色温方向一致，整体协调。"
         detectedUndertone != SkinUndertone.Unknown && targetUndertone != SkinUndertone.Unknown ->
             "本次识别为$detectedSkin，而款式主要面向$targetSkin，色温存在反差，协调度一般；可换成更贴近肤色色温的款式。"
+        detectedUndertone != SkinUndertone.Unknown && colorUndertone != SkinUndertone.Unknown && detectedUndertone == colorUndertone ->
+            "本次识别为$detectedSkin，款式颜色与肤色底调方向一致，整体协调。"
+        detectedUndertone != SkinUndertone.Unknown && colorUndertone != SkinUndertone.Unknown ->
+            "本次识别为$detectedSkin，款式颜色与肤色形成冷暖反差，视觉上更醒目，但协调度一般；可降低颜色饱和度让上手效果更柔和。"
         detectedSkin.isNotBlank() && targetSkin != null ->
             "已识别为$detectedSkin，但款式的肤色标签为$targetSkin，现有标签不足以可靠判断是否协调，建议以自然光下的试戴效果为准。"
         detectedSkin.isNotBlank() ->
@@ -809,20 +827,20 @@ internal fun buildTryOnAnalysis(
     val lengthLabel = context.length.label
     val shapeLabel = context.shape.label.ifBlank { nailType.trim().ifBlank { "自然甲型" } }
     val lengthContext = lengthLabel.takeIf { it.isNotBlank() }?.let { "$it、" }.orEmpty()
+    val handDescription = listOf(detectedHand, detectedNailBed).filter { it.isNotBlank() }.joinToString("、")
     val shapeAndLength = when {
-        detectedHand.isBlank() ->
+        handDescription.isBlank() ->
             "本次采用$lengthContext$shapeLabel，但没有识别到可靠手型，暂不能判断是否适合；可优先选择不过度超出指尖的长度。"
-        shapeNeedsElongation(detectedHand) && context.shape.widens && context.length.isShort ->
-            "识别到$detectedHand，本次$lengthContext${shapeLabel}会强化横向宽度，适配度一般；更建议中等长度的椭圆或杏仁甲。"
-        shapeNeedsElongation(detectedHand) && context.shape.elongates ->
-            "识别到$detectedHand，本次$lengthContext${shapeLabel}能延伸纵向线条，甲型和长度适合当前手型。"
-        shapeNeedsElongation(detectedHand) ->
-            "识别到$detectedHand，本次$lengthContext${shapeLabel}修饰力度有限，适配度一般；可适当增加长度或改为偏椭圆甲型。"
+        shapeNeedsElongation(handDescription) && context.shape.widens && context.length.isShort ->
+            "识别到$handDescription，本次$lengthContext${shapeLabel}会强化横向宽度，适配度一般；更建议中等长度的椭圆或杏仁甲。"
+        shapeNeedsElongation(handDescription) && context.shape.elongates ->
+            "识别到$handDescription，本次$lengthContext${shapeLabel}能延伸纵向线条，甲型和长度适合当前手型。"
+        shapeNeedsElongation(handDescription) ->
+            "识别到$handDescription，本次$lengthContext${shapeLabel}修饰力度有限，适配度一般；可适当增加长度或改为偏椭圆甲型。"
         else ->
-            "识别到$detectedHand，本次$lengthContext${shapeLabel}不会明显破坏手指比例，甲型和长度整体适合。"
+            "识别到$handDescription，本次$lengthContext${shapeLabel}不会明显破坏手指比例，甲型和长度整体适合。"
     }
 
-    val styleText = (listOf(styleName) + tags).joinToString(" ")
     val outfitAdvice = when {
         listOf("通勤", "职场").any(styleText::contains) ->
             "适合通勤穿搭，可搭配白衬衫、针织衫或浅色西装，用简洁首饰呼应甲面的精致感。"

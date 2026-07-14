@@ -85,4 +85,28 @@ class TryOnAnalysisTest {
         assertTrue(coolAnalysis.colorHarmony.contains("整体协调"))
         assertTrue(deepWarmAnalysis.colorHarmony.contains("整体协调"))
     }
+
+    @Test
+    fun `style color is assessed when catalog skin label is missing`() {
+        val analysis = buildTryOnAnalysis(
+            styleName = "蓝色星星美甲",
+            nailType = "短圆",
+            skinTone = "",
+            tags = listOf("蓝色", "日常"),
+            context = tryOnAnalysisContext(
+                selectedLength = "natural_short",
+                selectedShape = "round",
+                detectedTraits = mapOf(
+                    "skinTone" to "自然肤色",
+                    "skinUndertone" to "暖调",
+                    "handShape" to "手指修长",
+                    "nailBed" to "甲床偏短"
+                )
+            )
+        )
+
+        assertTrue(analysis.colorHarmony.contains("冷暖反差"))
+        assertTrue(analysis.colorHarmony.contains("协调度一般"))
+        assertTrue(analysis.shapeAndLength.contains("手指修长"))
+    }
 }
