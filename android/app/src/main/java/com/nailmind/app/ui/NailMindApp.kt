@@ -3657,17 +3657,16 @@ private fun StylesScreen(
                     .padding(start = 0.dp, top = 6.dp, end = 14.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                LazyColumn(
+                Column(
                     modifier = Modifier
                         .width(74.dp)
-                        .height((options.size * 44 + 12).dp)
                         .clip(RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp))
                         .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f), RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp)),
-                    contentPadding = PaddingValues(vertical = 6.dp),
+                        .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.22f), RoundedCornerShape(topStart = 0.dp, bottomStart = 0.dp, topEnd = 18.dp, bottomEnd = 18.dp))
+                        .padding(vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    items(options, key = { it.label }) { option ->
+                    options.forEach { option ->
                         val selected = selectedOption.label == option.label
                         Surface(
                             modifier = Modifier
