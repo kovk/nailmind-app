@@ -192,6 +192,8 @@ private sealed interface Screen {
     data class StyleDetail(val styleId: String) : Screen
     data object Search : Screen
     data class SearchResult(val query: String) : Screen
+    data object StyleFilter : Screen
+    data object StyleFilterResult : Screen
     data object Ranking : Screen
     data class TryOnUpload(val styleId: String, val fromFavorites: Boolean = false) : Screen
     data class TryOnProcessing(val styleId: String, val jobId: String) : Screen
@@ -230,15 +232,20 @@ private data class NailStyle(
     val tryOnStyleId: Int? = null
 )
 
-private enum class StyleBrowseTab(val title: String) {
+internal enum class StyleBrowseTab(val title: String) {
     NailShape("甲型"),
     Effect("效果"),
     Vibe("风格")
 }
 
-private data class StyleBrowseOption(
+internal data class StyleBrowseOption(
     val label: String,
     val keywords: List<String>
+)
+
+internal data class StyleFilterSelection(
+    val tab: StyleBrowseTab,
+    val option: StyleBrowseOption
 )
 
 private val nailShapeBrowseOptions = listOf(
@@ -729,6 +736,7 @@ fun NailMindApp() {
     var styleBrowseOptionLabel by rememberSaveable { mutableStateOf(nailShapeBrowseOptions.first().label) }
     var styleBrowseSortMode by rememberSaveable { mutableStateOf("热度高") }
     var styleBrowseQuery by rememberSaveable { mutableStateOf("") }
+    var selectedStyleFilters by remember { mutableStateOf(emptySet<StyleFilterSelection>()) }
     var homeRecommended by remember { mutableStateOf(styles.take(2)) }
     var homeHot by remember { mutableStateOf(styles) }
     var hotKeywords by remember { mutableStateOf(defaultHotKeywords) }
@@ -849,6 +857,8 @@ fun NailMindApp() {
         }
         Screen.Search -> "search"
         is Screen.SearchResult -> "search_result"
+        Screen.StyleFilter -> "style_filter"
+        Screen.StyleFilterResult -> "style_filter_result"
         Screen.Ranking -> "ranking"
         is Screen.StyleDetail -> "style_detail"
         is Screen.TryOnUpload -> "tryon_upload"
@@ -1234,6 +1244,8 @@ fun NailMindApp() {
         is Screen.StyleDetail -> "款式详情"
         Screen.Search -> "搜索款式"
         is Screen.SearchResult -> "搜索结果"
+        Screen.StyleFilter -> "筛选"
+        Screen.StyleFilterResult -> "筛选结果"
         Screen.Ranking -> "热门排行榜"
         is Screen.TryOnUpload -> "上传手部照片"
         is Screen.TryOnProcessing -> "手部识别中"
@@ -1523,6 +1535,7 @@ fun NailMindApp() {
                         onSelectedOptionChange = { styleBrowseOptionLabel = it },
                         onSortModeChange = { styleBrowseSortMode = it },
                         onQueryChange = { styleBrowseQuery = it },
+                        onOpenFilter = { go(Screen.StyleFilter) },
                         onRefresh = ::refreshPageData,
                         onStyleClick = { openStyleDetail(it, "styles", "style_grid_card") }
                     )
@@ -1604,6 +1617,40 @@ fun NailMindApp() {
                         )
                     }
                 )
+
+                Screen.StyleFilter -> StyleFilterScreen(
+                    selectedFilters = selectedStyleFilters,
+                    onToggleFilter = { selection ->
+                        selectedStyleFilters = if (selection in selectedStyleFilters) {
+                            selectedStyleFilters - selection
+                        } else {
+                            selectedStyleFilters + selection
+                        }
+                    },
+                    onClear = { selectedStyleFilters = emptySet() },
+                    onConfirm = { go(Screen.StyleFilterResult) }
+                )
+
+                Screen.StyleFilterResult -> {
+                    val filtered = styleItems.filter { it.matchesStyleFilters(selectedStyleFilters) }
+                    StyleFilterResultScreen(
+                        selectedFilters = selectedStyleFilters,
+                        result = filtered,
+                        onEditFilters = ::back,
+                        onStyleClick = {
+                            openStyleDetail(
+                                styleId = it,
+                                sourcePage = "style_filter_result",
+                                sourceChannel = "style_filter_result_card",
+                                payload = mapOf(
+                                    "filters" to selectedStyleFilters
+                                        .map { "${it.tab.name}:${it.option.label}" }
+                                        .sorted()
+                                )
+                            )
+                        }
+                    )
+                }
 
                 Screen.Ranking -> RankingScreen(
                     styles = (homeHot + homeRecommended + styleItems).distinctBy { it.id }.take(12),
@@ -3505,6 +3552,7 @@ private fun StylesScreen(
     onSelectedOptionChange: (String) -> Unit,
     onSortModeChange: (String) -> Unit,
     onQueryChange: (String) -> Unit,
+    onOpenFilter: () -> Unit,
     onRefresh: () -> Unit,
     onStyleClick: (String) -> Unit
 ) {
@@ -3553,10 +3601,7 @@ private fun StylesScreen(
                     modifier = Modifier
                         .width(86.dp)
                         .height(36.dp)
-                        .clickable {
-                            onQueryChange("")
-                            onSelectedOptionChange(options.first().label)
-                        },
+                        .clickable(onClick = onOpenFilter),
                     shape = RoundedCornerShape(16.dp),
                     color = Color.White,
                     border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f))
@@ -5755,6 +5800,255 @@ private fun SearchResultScreen(query: String, result: List<NailStyle>, onStyleCl
         }
         items(result) { style ->
             HotListItem(style = style, onClick = { onStyleClick(style.id) })
+        }
+    }
+}
+
+internal fun matchesStyleFilterSelections(
+    selectedFilters: Set<StyleFilterSelection>,
+    matchesOption: (tab: StyleBrowseTab, option: StyleBrowseOption) -> Boolean
+): Boolean {
+    if (selectedFilters.isEmpty()) return true
+    return selectedFilters.groupBy { it.tab }.all { (tab, selections) ->
+        selections.any { selection -> matchesOption(tab, selection.option) }
+    }
+}
+
+private fun NailStyle.matchesStyleFilters(selectedFilters: Set<StyleFilterSelection>): Boolean =
+    matchesStyleFilterSelections(selectedFilters) { tab, option ->
+        matchesBrowseOption(tab, option)
+    }
+
+@Composable
+private fun StyleFilterScreen(
+    selectedFilters: Set<StyleFilterSelection>,
+    onToggleFilter: (StyleFilterSelection) -> Unit,
+    onClear: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp)
+        ) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("选择你想看的标签", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        "同一类可多选，不同类别会组合筛选",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                    )
+                }
+            }
+            items(StyleBrowseTab.entries, key = { it.name }) { tab ->
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(tab.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    tab.options().chunked(3).forEach { rowOptions ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            rowOptions.forEach { option ->
+                                val selection = StyleFilterSelection(tab, option)
+                                StyleFilterOption(
+                                    label = option.label,
+                                    selected = selection in selectedFilters,
+                                    onClick = { onToggleFilter(selection) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            repeat(3 - rowOptions.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+            }
+        }
+
+        Surface(
+            color = MaterialTheme.colorScheme.surface,
+            shadowElevation = 10.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onClear, enabled = selectedFilters.isNotEmpty()) {
+                    Text("清空")
+                }
+                Button(
+                    onClick = onConfirm,
+                    enabled = selectedFilters.isNotEmpty(),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        if (selectedFilters.isEmpty()) "请选择标签" else "查看筛选结果（${selectedFilters.size}）",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StyleFilterOption(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .height(44.dp)
+            .clickable(onClick = onClick),
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(14.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+        )
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                fontSize = 14.sp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
+    }
+}
+
+@Composable
+private fun StyleFilterResultItem(style: NailStyle, onClick: () -> Unit) {
+    val tagSummary = buildList {
+        addAll(style.displayTags)
+        addAll(style.tags)
+        addAll(style.tagGroups.vibes)
+        addAll(style.tagGroups.effects)
+        addAll(style.tagGroups.nailShapes)
+        if (isEmpty()) add(style.vibe)
+    }.map { it.trim() }.filter { it.isNotBlank() }.distinct().take(6).joinToString("、")
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(22.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            GradientThumb(style = style, modifier = Modifier.size(88.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    style.name,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    tagSummary,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.28f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun StyleFilterResultScreen(
+    selectedFilters: Set<StyleFilterSelection>,
+    result: List<NailStyle>,
+    onEditFilters: () -> Unit,
+    onStyleClick: (String) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(start = 20.dp, top = 12.dp, end = 20.dp, bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "共 ${result.size} 款",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                )
+                TextButton(onClick = onEditFilters) { Text("修改筛选") }
+            }
+        }
+        item {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(
+                    selectedFilters.sortedWith(compareBy({ it.tab.ordinal }, { it.option.label })),
+                    key = { "${it.tab.name}:${it.option.label}" }
+                ) { selection ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(50)
+                    ) {
+                        Text(
+                            selection.option.label,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+        }
+        if (result.isEmpty()) {
+            item {
+                EmptyState("暂无筛选结果", "试试减少标签，或换一组条件。")
+            }
+        } else {
+            items(result, key = { it.id }) { style ->
+                StyleFilterResultItem(style = style, onClick = { onStyleClick(style.id) })
+            }
         }
     }
 }
