@@ -189,6 +189,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+internal const val BOOKING_REVIEW_REWARD_COPY = "完成评价，下次美甲立减 5 元"
+
 private enum class MainTab(
     val title: String,
     val icon: ImageVector
@@ -8994,22 +8996,19 @@ private fun BookingReviewDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("${item.storeName} · ${item.styleName}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ReviewEvidencePreview("预约款式", item.styleImageUrl, Modifier.weight(1f))
-                    ReviewEvidencePreview("实际效果", actualWorkUri, Modifier.weight(1f))
-                }
+                ReviewEvidencePreview("实际效果", actualWorkUri, Modifier.fillMaxWidth())
                 OutlinedButton(
                     onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (actualWorkFile == null) "上传实际作品照片" else "重新选择作品照片") }
+                ) { Text(if (actualWorkFile == null) "上传实际效果照片" else "重新选择实际效果照片") }
                 ReviewScoreRow("整体满意度", satisfaction) { satisfaction = it }
                 Text(
-                    "相似程度、颜色还原和细节完成度将由 AI 对比预约款式与实际效果图后评测。",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
+                    BOOKING_REVIEW_REWARD_COPY,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
                 )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
-                Text("评价仅用于真实订单质量统计；样本达到门槛后才会形成门店长期表现。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
             }
         },
         confirmButton = {
@@ -9038,7 +9037,7 @@ private fun ReviewEvidencePreview(label: String, model: Any?, modifier: Modifier
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
         Surface(
-            modifier = Modifier.fillMaxWidth().height(88.dp),
+            modifier = Modifier.fillMaxWidth().height(132.dp),
             shape = RoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.background
         ) {
