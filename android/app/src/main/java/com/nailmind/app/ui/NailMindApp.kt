@@ -838,7 +838,7 @@ private fun StoreDto.toUi(): Store {
         works = works,
         avatarRes = mock?.avatarRes,
         coverTone = mock?.coverTone ?: Color(0xFFEAD8D1),
-        reviewCount = works.filter { it.isDigit() }.toIntOrNull() ?: 0,
+        reviewCount = recommendation?.metrics?.verifiedReviewCount ?: 0,
         statusText = mock?.statusText ?: "\u8425\u4E1A\u4E2D",
         address = mock?.address ?: "\u95E8\u5E97\u5730\u5740\u8BF7\u4EE5\u5230\u5E97\u524D\u786E\u8BA4\u4E3A\u51C6",
         area = mock?.area ?: fallbackArea,

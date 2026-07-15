@@ -385,7 +385,12 @@ data class StoreRecommendationDto(
     val isNewStore: Boolean = false,
     val newStoreProtection: Boolean = false,
     val reason: String = "",
-    val algorithm: String = ""
+    val algorithm: String = "",
+    val metrics: StoreRecommendationMetricsDto = StoreRecommendationMetricsDto()
+)
+
+data class StoreRecommendationMetricsDto(
+    val verifiedReviewCount: Int = 0
 )
 
 data class RestorationDimensionsDto(
