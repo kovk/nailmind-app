@@ -147,6 +147,7 @@ import com.nailmind.app.R
 import com.nailmind.app.data.api.AuthResponse
 import com.nailmind.app.data.api.AuthUserDto
 import com.nailmind.app.data.api.BookingDto
+import com.nailmind.app.data.api.BookingReviewDto
 import com.nailmind.app.data.api.ChatMessageDto
 import com.nailmind.app.data.api.HomeResponse
 import com.nailmind.app.data.api.MeimeiChatResponse
@@ -156,6 +157,7 @@ import com.nailmind.app.data.api.MeimeiRecommendationDto
 import com.nailmind.app.data.api.MeimeiStreamEvent
 import com.nailmind.app.data.api.NailMindApiClient
 import com.nailmind.app.data.api.NailMindRepository
+import com.nailmind.app.data.api.RestorationCategoryDto
 import com.nailmind.app.data.api.SettingsResponse
 import com.nailmind.app.data.api.StoreDto
 import com.nailmind.app.data.api.StyleProfileTaxonomyDto
@@ -352,17 +354,34 @@ private data class BookingRecord(
     val id: String,
     val status: String,
     val storeName: String,
+    val styleId: String,
     val styleName: String,
-    val slot: String
+    val styleImageUrl: String?,
+    val slot: String,
+    val canReview: Boolean,
+    val review: BookingReviewDto?
 )
 
 private data class ReviewItem(
     val id: String,
     val storeName: String,
     val styleName: String,
+    val styleImageUrl: String? = null,
     val slot: String,
     val rating: Int? = null,
-    val comment: String = ""
+    val comment: String = "",
+    val similarityScore: Int? = null,
+    val colorScore: Int? = null,
+    val detailScore: Int? = null
+)
+
+private data class BookingReviewDraft(
+    val similarityScore: Int,
+    val colorScore: Int,
+    val detailScore: Int,
+    val satisfactionScore: Int,
+    val comment: String,
+    val actualWorkFile: File
 )
 private data class UserSettings(
     val stylePreferences: String,
@@ -781,8 +800,12 @@ private fun BookingDto.toUi(): BookingRecord = BookingRecord(
     id = id,
     status = status,
     storeName = storeName,
+    styleId = styleId,
     styleName = styleName,
-    slot = slot
+    styleImageUrl = styleImageUrl,
+    slot = slot,
+    canReview = canReview,
+    review = review
 )
 
 private fun buildDisplayedTryOnHistory(
@@ -1109,6 +1132,7 @@ fun NailMindApp() {
     var trendsUpdatedAt by remember { mutableStateOf("") }
     var hotKeywords by remember { mutableStateOf(defaultHotKeywords) }
     var storeItems by remember { mutableStateOf(stores) }
+    var restorationPerformance by remember { mutableStateOf(emptyMap<String, List<RestorationCategoryDto>>()) }
     var bookingRecords by remember { mutableStateOf(emptyList<BookingRecord>()) }
     var pendingBooking by remember { mutableStateOf<BookingDto?>(null) }
     var userSettings by remember { mutableStateOf(UserSettings("", "", "")) }
@@ -2285,12 +2309,36 @@ fun NailMindApp() {
                     onRefresh = ::refreshPageData
                 )
 
-                Screen.Reviews -> ReviewsScreen(records = bookingRecords)
+                Screen.Reviews -> ReviewsScreen(
+                    records = bookingRecords,
+                    onSubmit = { bookingId, draft ->
+                        val imageUrl = repository.uploadBookingReviewImage(bookingId, draft.actualWorkFile).imageUrl
+                        repository.reviewBooking(
+                            bookingId = bookingId,
+                            similarityScore = draft.similarityScore,
+                            colorScore = draft.colorScore,
+                            detailScore = draft.detailScore,
+                            satisfactionScore = draft.satisfactionScore,
+                            comment = draft.comment,
+                            actualWorkImageUrl = imageUrl
+                        )
+                        bookingRecords = repository.bookings().items.map { it.toUi() }
+                    }
+                )
 
                 is Screen.StoreDetail -> {
                     val store = storeItems.firstOrNull { it.id == screen.storeId } ?: return@AnimatedContent
+                    LaunchedEffect(store.id) {
+                        if (restorationPerformance[store.id] == null) {
+                            runCatching { repository.restorationPerformance(store.id).categories }
+                                .onSuccess { categories ->
+                                    restorationPerformance = restorationPerformance + (store.id to categories)
+                                }
+                        }
+                    }
                     StoreDetailScreen(
                         store = store,
+                        restorationCategories = restorationPerformance[store.id].orEmpty(),
                         onBack = ::back,
                         onConsult = {
                             coroutineScope.launch {
@@ -7909,7 +7957,13 @@ private fun FavoritesScreen(
 }
 
 @Composable
-private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onConsult: () -> Unit, onBook: () -> Unit) {
+private fun StoreDetailScreen(
+    store: Store,
+    restorationCategories: List<RestorationCategoryDto>,
+    onBack: () -> Unit,
+    onConsult: () -> Unit,
+    onBook: () -> Unit
+) {
     val context = LocalContext.current
     val primary = Color(0xFFF25F86)
     Box(
@@ -7947,6 +8001,14 @@ private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onConsult: () ->
                         .offset(y = (-42).dp)
                 )
             }
+            if (restorationCategories.isNotEmpty()) {
+                item {
+                    RestorationPerformanceSection(
+                        categories = restorationCategories,
+                        modifier = Modifier.padding(horizontal = 12.dp).offset(y = (-42).dp)
+                    )
+                }
+            }
         }
         StoreDetailBottomBar(
             primary = primary,
@@ -7954,6 +8016,60 @@ private fun StoreDetailScreen(store: Store, onBack: () -> Unit, onConsult: () ->
             onBook = onBook,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+    }
+}
+
+@Composable
+private fun RestorationPerformanceSection(
+    categories: List<RestorationCategoryDto>,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 1.dp
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("综合还原表现", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Text(
+                "来自已完成真实订单的长期评价，不由单张图片直接打分。",
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                fontSize = 12.sp
+            )
+            categories.forEach { category ->
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(category.styleCategory, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                            Text(
+                                category.compositeScore?.let { "${it.toInt()} / 100" } ?: "样本积累中",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        if (category.status == "published" && category.dimensions != null) {
+                            val dimensions = category.dimensions
+                            Text(
+                                "相似 ${dimensions.similarity.toInt()} · 色彩 ${dimensions.color.toInt()} · 细节 ${dimensions.detail.toInt()} · 满意 ${dimensions.satisfaction.toInt()}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f)
+                            )
+                            Text("基于 ${category.sampleSize} 个已完成订单", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f))
+                        } else {
+                            Text(
+                                "已有 ${category.sampleSize} 个样本，满 ${category.minimumSampleSize} 个后展示综合表现",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.56f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -8663,8 +8779,12 @@ private fun BookingRecordsScreen(
 }
 
 @Composable
-private fun ReviewsScreen(records: List<BookingRecord>) {
+private fun ReviewsScreen(
+    records: List<BookingRecord>,
+    onSubmit: suspend (String, BookingReviewDraft) -> Unit
+) {
     var selectedTab by remember { mutableStateOf("待评价") }
+    var editingItem by remember { mutableStateOf<ReviewItem?>(null) }
     val pendingReviews = remember(records) { buildPendingReviewItems(records) }
     val finishedReviews = remember(records) { buildFinishedReviewItems(records) }
     val currentItems = if (selectedTab == "待评价") pendingReviews else finishedReviews
@@ -8691,9 +8811,20 @@ private fun ReviewsScreen(records: List<BookingRecord>) {
             }
         } else {
             items(currentItems) { item ->
-                UserReviewCard(item = item, pending = selectedTab == "待评价")
+                UserReviewCard(
+                    item = item,
+                    pending = selectedTab == "待评价",
+                    onReview = { editingItem = item }
+                )
             }
         }
+    }
+    editingItem?.let { item ->
+        BookingReviewDialog(
+            item = item,
+            onDismiss = { editingItem = null },
+            onSubmit = onSubmit
+        )
     }
 }
 
@@ -8759,7 +8890,7 @@ private fun ReviewTab(title: String, count: Int, selected: Boolean, modifier: Mo
 }
 
 @Composable
-private fun UserReviewCard(item: ReviewItem, pending: Boolean) {
+private fun UserReviewCard(item: ReviewItem, pending: Boolean, onReview: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
@@ -8778,7 +8909,8 @@ private fun UserReviewCard(item: ReviewItem, pending: Boolean) {
                         nailType = "",
                         skinTone = "",
                         colors = listOf(RoseAccent.copy(alpha = 0.82f), Color(0xFFF7D8E4)),
-                        tags = emptyList()
+                        tags = emptyList(),
+                        imageUrl = item.styleImageUrl
                     ),
                     modifier = Modifier.size(58.dp)
                 )
@@ -8808,7 +8940,7 @@ private fun UserReviewCard(item: ReviewItem, pending: Boolean) {
                     }
                     Spacer(Modifier.weight(1f))
                     Button(
-                        onClick = {},
+                        onClick = onReview,
                         modifier = Modifier.height(34.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp)
                     ) {
@@ -8816,45 +8948,169 @@ private fun UserReviewCard(item: ReviewItem, pending: Boolean) {
                     }
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    repeat(5) { index ->
-                        Icon(
-                            Icons.Rounded.Star,
-                            contentDescription = null,
-                            tint = if (index < (item.rating ?: 5)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                            modifier = Modifier.size(16.dp)
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        repeat(5) { index ->
+                            Icon(
+                                Icons.Rounded.Star,
+                                contentDescription = null,
+                                tint = if (index < (item.rating ?: 5)) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Text(item.comment.ifBlank { "已完成真实订单评价" }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Text(item.comment, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "相似 ${item.similarityScore}/5 · 色彩 ${item.colorScore}/5 · 细节 ${item.detailScore}/5",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        fontSize = 11.sp
+                    )
                 }
             }
         }
     }
 }
 
+@Composable
+private fun BookingReviewDialog(
+    item: ReviewItem,
+    onDismiss: () -> Unit,
+    onSubmit: suspend (String, BookingReviewDraft) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var similarity by remember { mutableStateOf(5) }
+    var color by remember { mutableStateOf(5) }
+    var detail by remember { mutableStateOf(5) }
+    var satisfaction by remember { mutableStateOf(5) }
+    var comment by remember { mutableStateOf("") }
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var actualWorkUri by remember { mutableStateOf<Uri?>(null) }
+    var actualWorkFile by remember { mutableStateOf<File?>(null) }
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            actualWorkUri = uri
+            actualWorkFile = copyUriToCache(context, uri)
+            if (actualWorkFile == null) error = "读取作品照片失败，请重新选择"
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!submitting) onDismiss() },
+        title = { Text("评价实际效果") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("${item.storeName} · ${item.styleName}", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f), fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ReviewEvidencePreview("预约款式", item.styleImageUrl, Modifier.weight(1f))
+                    ReviewEvidencePreview("实际效果", actualWorkUri, Modifier.weight(1f))
+                }
+                OutlinedButton(
+                    onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (actualWorkFile == null) "上传实际作品照片" else "重新选择作品照片") }
+                ReviewScoreRow("与预约款式相似程度", similarity) { similarity = it }
+                ReviewScoreRow("颜色还原情况", color) { color = it }
+                ReviewScoreRow("细节完成度", detail) { detail = it }
+                ReviewScoreRow("整体满意度", satisfaction) { satisfaction = it }
+                OutlinedTextField(
+                    value = comment,
+                    onValueChange = { if (it.length <= 1000) comment = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("补充评价（选填）") },
+                    minLines = 2
+                )
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+                Text("评价仅用于真实订单质量统计；样本达到门槛后才会形成门店长期表现。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = !submitting && actualWorkFile != null,
+                onClick = {
+                    scope.launch {
+                        submitting = true
+                        error = null
+                        val evidenceFile = actualWorkFile ?: return@launch
+                        val draft = BookingReviewDraft(similarity, color, detail, satisfaction, comment, evidenceFile)
+                        runCatching { onSubmit(item.id, draft) }
+                            .onSuccess { onDismiss() }
+                            .onFailure { error = it.message ?: "提交评价失败" }
+                        submitting = false
+                    }
+                }
+            ) { Text(if (submitting) "提交中..." else "提交评价") }
+        },
+        dismissButton = { TextButton(enabled = !submitting, onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun ReviewEvidencePreview(label: String, model: Any?, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f))
+        Surface(
+            modifier = Modifier.fillMaxWidth().height(88.dp),
+            shape = RoundedCornerShape(10.dp),
+            color = MaterialTheme.colorScheme.background
+        ) {
+            if (model == null) {
+                Box(contentAlignment = Alignment.Center) { Text("待上传", fontSize = 12.sp) }
+            } else {
+                SubcomposeAsyncImage(model = model, contentDescription = label, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) {
+                    val state = painter.state
+                    if (state is AsyncImagePainter.State.Success) SubcomposeAsyncImageContent()
+                    else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.size(20.dp)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReviewScoreRow(label: String, score: Int, onScoreChange: (Int) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            (1..5).forEach { value ->
+                Icon(
+                    Icons.Rounded.Star,
+                    contentDescription = "$label $value 分",
+                    tint = if (value <= score) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.28f),
+                    modifier = Modifier.size(24.dp).clickable { onScoreChange(value) }
+                )
+            }
+        }
+    }
+}
+
 private fun buildPendingReviewItems(records: List<BookingRecord>): List<ReviewItem> {
-    val completed = records.filter { it.status.contains("完成") || it.status.contains("completed", ignoreCase = true) }
-    val source = completed.ifEmpty { records.take(2) }
-    return source.mapIndexed { index, record ->
+    return records.filter { it.canReview }.map { record ->
         ReviewItem(
-            id = "pending-${record.id}-$index",
+            id = record.id,
             storeName = record.storeName,
             styleName = record.styleName,
+            styleImageUrl = record.styleImageUrl,
             slot = record.slot
         )
     }
 }
 
 private fun buildFinishedReviewItems(records: List<BookingRecord>): List<ReviewItem> {
-    val source = records.drop(2).take(2)
-    return source.mapIndexed { index, record ->
+    return records.mapNotNull { record ->
+        val review = record.review ?: return@mapNotNull null
         ReviewItem(
-            id = "finished-${record.id}-$index",
+            id = record.id,
             storeName = record.storeName,
             styleName = record.styleName,
+            styleImageUrl = record.styleImageUrl,
             slot = record.slot,
-            rating = if (index % 2 == 0) 5 else 4,
-            comment = if (index % 2 == 0) "款式还原度高，修型很细致" else "门店服务很耐心，下次还会约"
+            rating = review.satisfactionScore,
+            comment = review.comment,
+            similarityScore = review.similarityScore,
+            colorScore = review.colorScore,
+            detailScore = review.detailScore
         )
     }
 }

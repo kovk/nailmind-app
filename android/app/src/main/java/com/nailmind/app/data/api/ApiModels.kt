@@ -378,6 +378,27 @@ data class StoreDto(
     val works: String
 )
 
+data class RestorationDimensionsDto(
+    val similarity: Double,
+    val color: Double,
+    val detail: Double,
+    val satisfaction: Double
+)
+
+data class RestorationCategoryDto(
+    val styleCategory: String,
+    val status: String,
+    val sampleSize: Int,
+    val minimumSampleSize: Int,
+    val compositeScore: Double? = null,
+    val dimensions: RestorationDimensionsDto? = null
+)
+
+data class RestorationPerformanceResponse(
+    val storeId: String,
+    val categories: List<RestorationCategoryDto> = emptyList()
+)
+
 data class StoresResponse(
     val items: List<StoreDto>
 )
@@ -453,13 +474,42 @@ data class BookingDto(
     val storeName: String,
     val styleId: String,
     val styleName: String,
+    val styleImageUrl: String? = null,
     val slot: String,
     val price: String,
     val name: String,
     val phone: String,
     val note: String,
     val createdAt: String,
-    val confirmedAt: String? = null
+    val confirmedAt: String? = null,
+    val canReview: Boolean = false,
+    val review: BookingReviewDto? = null
+)
+
+data class BookingReviewRequest(
+    val similarityScore: Int,
+    val colorScore: Int,
+    val detailScore: Int,
+    val satisfactionScore: Int,
+    val comment: String = "",
+    val actualWorkImageUrl: String
+)
+
+data class BookingReviewImageUploadResponse(val imageUrl: String)
+
+data class BookingReviewDto(
+    val id: String,
+    val bookingId: String,
+    val storeId: String,
+    val styleId: String,
+    val styleCategory: String,
+    val similarityScore: Int,
+    val colorScore: Int,
+    val detailScore: Int,
+    val satisfactionScore: Int,
+    val comment: String = "",
+    val actualWorkImageUrl: String? = null,
+    val createdAt: String
 )
 
 data class ProfileResponse(

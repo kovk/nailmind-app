@@ -239,6 +239,9 @@ class NailMindRepository(
 
     suspend fun storeSlots(storeId: String): StoreSlotsResponse = service.storeSlots(storeId)
 
+    suspend fun restorationPerformance(storeId: String): RestorationPerformanceResponse =
+        service.restorationPerformance(storeId)
+
     suspend fun startChat(storeId: String, initialMessage: String = ""): ChatStartResponse =
         service.startChat(ChatStartRequest(storeId = storeId, initialMessage = initialMessage))
 
@@ -270,6 +273,32 @@ class NailMindRepository(
     suspend fun booking(bookingId: String): BookingDto = service.booking(bookingId)
 
     suspend fun confirmBooking(bookingId: String): BookingDto = service.confirmBooking(bookingId)
+
+    suspend fun reviewBooking(
+        bookingId: String,
+        similarityScore: Int,
+        colorScore: Int,
+        detailScore: Int,
+        satisfactionScore: Int,
+        comment: String,
+        actualWorkImageUrl: String
+    ): BookingReviewDto = service.reviewBooking(
+        bookingId,
+        BookingReviewRequest(
+            similarityScore = similarityScore,
+            colorScore = colorScore,
+            detailScore = detailScore,
+            satisfactionScore = satisfactionScore,
+            comment = comment,
+            actualWorkImageUrl = actualWorkImageUrl
+        )
+    )
+
+    suspend fun uploadBookingReviewImage(bookingId: String, file: File): BookingReviewImageUploadResponse {
+        val requestBody = file.asRequestBody("image/*".toMediaType())
+        val part = MultipartBody.Part.createFormData("file", file.name, requestBody)
+        return service.uploadBookingReviewImage(bookingId, part)
+    }
 
     suspend fun profile(): ProfileResponse = service.profile()
 

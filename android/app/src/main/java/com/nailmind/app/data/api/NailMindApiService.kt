@@ -114,6 +114,9 @@ interface NailMindApiService {
     @GET("api/stores/{storeId}/slots")
     suspend fun storeSlots(@Path("storeId") storeId: String): StoreSlotsResponse
 
+    @GET("api/stores/{storeId}/restoration-performance")
+    suspend fun restorationPerformance(@Path("storeId") storeId: String): RestorationPerformanceResponse
+
     @POST("api/chats")
     suspend fun startChat(@Body request: ChatStartRequest): ChatStartResponse
 
@@ -134,6 +137,16 @@ interface NailMindApiService {
 
     @POST("api/bookings/{bookingId}/confirm")
     suspend fun confirmBooking(@Path("bookingId") bookingId: String): BookingDto
+
+    @POST("api/bookings/{bookingId}/review")
+    suspend fun reviewBooking(@Path("bookingId") bookingId: String, @Body request: BookingReviewRequest): BookingReviewDto
+
+    @Multipart
+    @POST("api/bookings/{bookingId}/review-image")
+    suspend fun uploadBookingReviewImage(
+        @Path("bookingId") bookingId: String,
+        @Part file: MultipartBody.Part
+    ): BookingReviewImageUploadResponse
 
     @GET("api/profile")
     suspend fun profile(): ProfileResponse
