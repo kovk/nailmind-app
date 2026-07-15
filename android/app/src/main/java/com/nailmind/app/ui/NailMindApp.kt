@@ -9219,7 +9219,6 @@ private fun SettingsScreen(settings: UserSettings, onLogout: () -> Unit) {
         contentPadding = PaddingValues(20.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { CompactValue("风格偏好", settings.stylePreferences) }
         item { CompactValue("消息通知", settings.notifications) }
         item { CompactValue("隐私设置", settings.privacy) }
         item {
