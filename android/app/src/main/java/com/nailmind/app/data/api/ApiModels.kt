@@ -487,11 +487,7 @@ data class BookingDto(
 )
 
 data class BookingReviewRequest(
-    val similarityScore: Int,
-    val colorScore: Int,
-    val detailScore: Int,
     val satisfactionScore: Int,
-    val comment: String = "",
     val actualWorkImageUrl: String
 )
 
@@ -509,7 +505,11 @@ data class BookingReviewDto(
     val satisfactionScore: Int,
     val comment: String = "",
     val actualWorkImageUrl: String? = null,
-    val createdAt: String
+    val createdAt: String,
+    val evaluationStatus: String = "completed",
+    val evaluationSource: String = "ai",
+    val evaluationModel: String? = null,
+    val evaluationNote: String = ""
 )
 
 data class ProfileResponse(

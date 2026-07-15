@@ -372,15 +372,12 @@ private data class ReviewItem(
     val comment: String = "",
     val similarityScore: Int? = null,
     val colorScore: Int? = null,
-    val detailScore: Int? = null
+    val detailScore: Int? = null,
+    val evaluationNote: String = ""
 )
 
 private data class BookingReviewDraft(
-    val similarityScore: Int,
-    val colorScore: Int,
-    val detailScore: Int,
     val satisfactionScore: Int,
-    val comment: String,
     val actualWorkFile: File
 )
 private data class UserSettings(
@@ -2315,11 +2312,7 @@ fun NailMindApp() {
                         val imageUrl = repository.uploadBookingReviewImage(bookingId, draft.actualWorkFile).imageUrl
                         repository.reviewBooking(
                             bookingId = bookingId,
-                            similarityScore = draft.similarityScore,
-                            colorScore = draft.colorScore,
-                            detailScore = draft.detailScore,
                             satisfactionScore = draft.satisfactionScore,
-                            comment = draft.comment,
                             actualWorkImageUrl = imageUrl
                         )
                         bookingRecords = repository.bookings().items.map { it.toUi() }
@@ -8961,10 +8954,13 @@ private fun UserReviewCard(item: ReviewItem, pending: Boolean, onReview: () -> U
                         Text(item.comment.ifBlank { "已完成真实订单评价" }, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(
-                        "相似 ${item.similarityScore}/5 · 色彩 ${item.colorScore}/5 · 细节 ${item.detailScore}/5",
+                        "AI评测：相似 ${item.similarityScore}/5 · 色彩 ${item.colorScore}/5 · 细节 ${item.detailScore}/5",
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         fontSize = 11.sp
                     )
+                    if (item.evaluationNote.isNotBlank()) {
+                        Text(item.evaluationNote, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.46f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
@@ -8979,11 +8975,7 @@ private fun BookingReviewDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var similarity by remember { mutableStateOf(5) }
-    var color by remember { mutableStateOf(5) }
-    var detail by remember { mutableStateOf(5) }
     var satisfaction by remember { mutableStateOf(5) }
-    var comment by remember { mutableStateOf("") }
     var submitting by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var actualWorkUri by remember { mutableStateOf<Uri?>(null) }
@@ -9010,16 +9002,11 @@ private fun BookingReviewDialog(
                     onClick = { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (actualWorkFile == null) "上传实际作品照片" else "重新选择作品照片") }
-                ReviewScoreRow("与预约款式相似程度", similarity) { similarity = it }
-                ReviewScoreRow("颜色还原情况", color) { color = it }
-                ReviewScoreRow("细节完成度", detail) { detail = it }
                 ReviewScoreRow("整体满意度", satisfaction) { satisfaction = it }
-                OutlinedTextField(
-                    value = comment,
-                    onValueChange = { if (it.length <= 1000) comment = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("补充评价（选填）") },
-                    minLines = 2
+                Text(
+                    "相似程度、颜色还原和细节完成度将由 AI 对比预约款式与实际效果图后评测。",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f)
                 )
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
                 Text("评价仅用于真实订单质量统计；样本达到门槛后才会形成门店长期表现。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
@@ -9033,7 +9020,7 @@ private fun BookingReviewDialog(
                         submitting = true
                         error = null
                         val evidenceFile = actualWorkFile ?: return@launch
-                        val draft = BookingReviewDraft(similarity, color, detail, satisfaction, comment, evidenceFile)
+                        val draft = BookingReviewDraft(satisfaction, evidenceFile)
                         runCatching { onSubmit(item.id, draft) }
                             .onSuccess { onDismiss() }
                             .onFailure { error = it.message ?: "提交评价失败" }
@@ -9110,7 +9097,8 @@ private fun buildFinishedReviewItems(records: List<BookingRecord>): List<ReviewI
             comment = review.comment,
             similarityScore = review.similarityScore,
             colorScore = review.colorScore,
-            detailScore = review.detailScore
+            detailScore = review.detailScore,
+            evaluationNote = review.evaluationNote
         )
     }
 }

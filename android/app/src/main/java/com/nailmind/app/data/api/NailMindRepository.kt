@@ -276,20 +276,12 @@ class NailMindRepository(
 
     suspend fun reviewBooking(
         bookingId: String,
-        similarityScore: Int,
-        colorScore: Int,
-        detailScore: Int,
         satisfactionScore: Int,
-        comment: String,
         actualWorkImageUrl: String
     ): BookingReviewDto = service.reviewBooking(
         bookingId,
         BookingReviewRequest(
-            similarityScore = similarityScore,
-            colorScore = colorScore,
-            detailScore = detailScore,
             satisfactionScore = satisfactionScore,
-            comment = comment,
             actualWorkImageUrl = actualWorkImageUrl
         )
     )
