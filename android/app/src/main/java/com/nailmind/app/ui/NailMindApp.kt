@@ -158,6 +158,7 @@ import com.nailmind.app.data.api.MeimeiRecommendationDto
 import com.nailmind.app.data.api.MeimeiStreamEvent
 import com.nailmind.app.data.api.NailMindApiClient
 import com.nailmind.app.data.api.NailMindRepository
+import com.nailmind.app.data.api.registrationPasswordValidationMessage
 import com.nailmind.app.data.api.RestorationCategoryDto
 import com.nailmind.app.data.api.SettingsResponse
 import com.nailmind.app.data.api.StoreDto
@@ -1977,6 +1978,7 @@ fun NailMindApp() {
                     initialEmail = "",
                     initialPassword = "",
                     showNameField = false,
+                    passwordHint = null,
                     loading = authLoading,
                     errorMessage = authError,
                     onPrimary = { _, email, password ->
@@ -2013,9 +2015,14 @@ fun NailMindApp() {
                     initialEmail = "",
                     initialPassword = "",
                     showNameField = true,
+                    passwordHint = "至少 8 位",
                     loading = authLoading,
                     errorMessage = authError,
-                    onPrimary = { name, email, password ->
+                    onPrimary = register@ { name, email, password ->
+                        registrationPasswordValidationMessage(password)?.let {
+                            authError = it
+                            return@register
+                        }
                         coroutineScope.launch {
                             authLoading = true
                             authError = null
@@ -9237,6 +9244,7 @@ private fun AuthScreen(
     initialEmail: String,
     initialPassword: String,
     showNameField: Boolean,
+    passwordHint: String?,
     loading: Boolean,
     errorMessage: String?,
     onPrimary: (String, String, String) -> Unit,
@@ -9282,7 +9290,8 @@ private fun AuthScreen(
                     value = password,
                     onValueChange = { password = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("密码") }
+                    label = { Text("密码") },
+                    supportingText = if (passwordHint.isNullOrBlank()) null else ({ Text(passwordHint) })
                 )
                 if (!errorMessage.isNullOrBlank()) {
                     Text(

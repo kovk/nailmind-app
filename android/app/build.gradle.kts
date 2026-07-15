@@ -36,8 +36,8 @@ android {
         applicationId = "com.nailmind.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = intProperty("NAILMIND_VERSION_CODE", 3)
-        versionName = stringProperty("NAILMIND_VERSION_NAME", "1.0.2")
+        versionCode = intProperty("NAILMIND_VERSION_CODE", 4)
+        versionName = stringProperty("NAILMIND_VERSION_NAME", "1.0.3")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

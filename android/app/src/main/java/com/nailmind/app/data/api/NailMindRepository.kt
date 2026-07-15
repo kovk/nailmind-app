@@ -5,6 +5,7 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.IOException
+import com.google.gson.JsonParser
 import com.nailmind.app.data.config.AppConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -14,8 +15,14 @@ import kotlinx.coroutines.flow.flowOn
 class NailMindRepository(
     private val service: NailMindApiService = NailMindApiClient.service
 ) {
-    suspend fun register(name: String, email: String, password: String): AuthResponse =
-        service.register(RegisterRequest(name = name, email = email, password = password))
+    suspend fun register(name: String, email: String, password: String): AuthResponse {
+        registrationPasswordValidationMessage(password)?.let { throw IllegalArgumentException(it) }
+        val response = service.register(RegisterRequest(name = name, email = email, password = password))
+        if (!response.isSuccessful) {
+            throw IOException(registrationErrorMessage(response.code(), response.errorBody()?.string().orEmpty()))
+        }
+        return response.body() ?: throw IOException("注册失败，请稍后重试")
+    }
 
     suspend fun login(email: String, password: String): AuthResponse =
         service.login(AuthRequest(email = email, password = password))
@@ -295,6 +302,21 @@ class NailMindRepository(
     suspend fun profile(): ProfileResponse = service.profile()
 
     suspend fun settings(): SettingsResponse = service.settings()
+}
+
+internal fun registrationPasswordValidationMessage(password: String): String? =
+    if (password.length < 8) "密码至少需要 8 位" else null
+
+internal fun registrationErrorMessage(statusCode: Int, errorBody: String): String {
+    val detail = runCatching {
+        JsonParser.parseString(errorBody).asJsonObject.get("detail")?.asString.orEmpty()
+    }.getOrDefault("")
+    if (detail.isNotBlank()) return detail
+    return when (statusCode) {
+        409 -> "该邮箱已经注册"
+        in 400..499 -> "注册信息有误，请检查后重试"
+        else -> "注册失败，请稍后重试"
+    }
 }
 
 internal fun HomeResponse.normalized(): HomeResponse {
