@@ -143,6 +143,7 @@ import androidx.core.app.NotificationManagerCompat
 import coil.compose.AsyncImagePainter
 import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
+import com.nailmind.app.BuildConfig
 import com.nailmind.app.R
 import com.nailmind.app.data.api.AuthResponse
 import com.nailmind.app.data.api.AuthUserDto
@@ -329,6 +330,13 @@ private val vibeBrowseOptions = listOf(
     StyleBrowseOption("极繁", listOf("极繁"))
 )
 
+private data class StoreRecommendationUi(
+    val isNewStore: Boolean = false,
+    val newStoreProtection: Boolean = false,
+    val rank: Int = Int.MAX_VALUE,
+    val reason: String = ""
+)
+
 private data class Store(
     val id: String,
     val name: String,
@@ -349,7 +357,8 @@ private data class Store(
     val nearestSlot: String = slots.firstOrNull().orEmpty(),
     val matchScore: Int = 88,
     val couponText: String = "新客预约立减",
-    val salesText: String = ""
+    val salesText: String = "",
+    val recommendation: StoreRecommendationUi = StoreRecommendationUi()
 )
 
 private data class BookingRecord(
@@ -693,6 +702,58 @@ private val reservationSampleStores: List<Store> = listOf(
         matchScore = 89,
         couponText = "款式升级券",
         salesText = "年售 300+"
+    ),
+    Store(
+        id = "muse-new-xiamen",
+        name = "MUSE Nail 新作研究所",
+        distance = "2.2km",
+        priceBand = "¥79/人",
+        score = "",
+        slots = listOf("今天 13:00", "今天 17:30", "明天 11:00"),
+        openHours = "10:00-21:30",
+        artists = 2,
+        works = "暂无评价",
+        coverTone = Color(0xFFC78F9B),
+        reviewCount = 0,
+        statusText = "新店",
+        address = "思明区湖滨南路新景中心2楼",
+        area = "思明区",
+        tags = listOf("平台审核通过", "法式简约", "短甲友好"),
+        nearestSlot = "今天 13:00 可约",
+        matchScore = 86,
+        couponText = "新店体验立减 20",
+        salesText = "新店试营业",
+        recommendation = StoreRecommendationUi(
+            isNewStore = true,
+            rank = 7,
+            reason = "新店 · 擅长法式简约 · 今天可约"
+        )
+    ),
+    Store(
+        id = "light-nail-new",
+        name = "LIGHT NAIL 光感美甲",
+        distance = "4.6km",
+        priceBand = "¥88/人",
+        score = "",
+        slots = listOf("今天 18:00", "明天 10:30", "明天 16:00"),
+        openHours = "11:00-22:00",
+        artists = 3,
+        works = "暂无评价",
+        coverTone = Color(0xFF9CAFC2),
+        reviewCount = 0,
+        statusText = "新店",
+        address = "湖里区五缘湾天虹里3楼",
+        area = "湖里区",
+        tags = listOf("平台审核通过", "猫眼专门", "不满意重做"),
+        nearestSlot = "今天 18:00 可约",
+        matchScore = 83,
+        couponText = "新客首单 85 折",
+        salesText = "新店试营业",
+        recommendation = StoreRecommendationUi(
+            isNewStore = true,
+            rank = 8,
+            reason = "新店 · 擅长猫眼渐变 · 明天可约"
+        )
     )
 )
 private val stores: List<Store> = reservationSampleStores
@@ -785,8 +846,29 @@ private fun StoreDto.toUi(): Store {
         nearestSlot = mock?.nearestSlot ?: slots.firstOrNull()?.let { "$it \u53EF\u7EA6" } ?: "\u4ECA\u65E5\u53EF\u7EA6",
         matchScore = mock?.matchScore ?: 88,
         couponText = mock?.couponText ?: "\u65B0\u5BA2\u9884\u7EA6\u7ACB\u51CF",
-        salesText = mock?.salesText ?: works
+        salesText = mock?.salesText ?: works,
+        recommendation = StoreRecommendationUi(
+            isNewStore = recommendation?.isNewStore ?: mock?.recommendation?.isNewStore ?: false,
+            newStoreProtection = recommendation?.newStoreProtection ?: mock?.recommendation?.newStoreProtection ?: false,
+            rank = recommendation?.rank ?: mock?.recommendation?.rank ?: Int.MAX_VALUE,
+            reason = recommendation?.reason ?: mock?.recommendation?.reason.orEmpty()
+        )
     )
+}
+
+private fun rankBookingStores(items: List<Store>): List<Store> {
+    return items.distinctBy { it.id }
+        .withIndex()
+        .sortedWith(compareBy<IndexedValue<Store>> { it.value.recommendation.rank }.thenBy { it.index })
+        .map { it.value }
+}
+
+private fun storesWithDemoFallback(fetchedStores: List<Store>): List<Store> {
+    return if (BuildConfig.BOOKING_DEMO_STORES_ENABLED) {
+        fetchedStores + reservationSampleStores
+    } else {
+        fetchedStores
+    }
 }
 private fun AuthUserDto.toUi(): AuthUser = AuthUser(
     name = name,
@@ -1520,7 +1602,7 @@ fun NailMindApp() {
         val fetchedStyles = repository.styles().items.map { it.toUi() }.filter { !it.imageUrl.isNullOrBlank() }
         val fetchedStores = runCatching { repository.stores().items.map { it.toUi() } }
             .getOrElse { emptyList() }
-        val displayedStores = (fetchedStores + reservationSampleStores).distinctBy { it.id }
+        val displayedStores = rankBookingStores(storesWithDemoFallback(fetchedStores))
 
         styleItems = fetchedStyles
         storeItems = displayedStores
@@ -1594,13 +1676,18 @@ fun NailMindApp() {
     }
 
     fun openBookingForStyle(styleId: String) {
-        val firstStore = storeItems.firstOrNull()
-        if (firstStore == null) {
-            Toast.makeText(context, "当前还没有可预约门店", Toast.LENGTH_SHORT).show()
-            return
+        coroutineScope.launch {
+            val fetchedStores = runCatching { repository.stores(styleId).items.map { it.toUi() } }.getOrElse { emptyList() }
+            val rankedStores = rankBookingStores(storesWithDemoFallback(fetchedStores))
+            storeItems = rankedStores
+            val firstStore = rankedStores.firstOrNull()
+            if (firstStore == null) {
+                Toast.makeText(context, "当前还没有可预约门店", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            selectedStoreId = firstStore.id
+            go(Screen.BookingForm(firstStore.id, styleId))
         }
-        selectedStoreId = firstStore.id
-        go(Screen.BookingForm(firstStore.id, styleId))
     }
 
     val displayedTryOnHistoryItems = buildDisplayedTryOnHistory(tryOnHistoryItems, tryOnStatus)
@@ -6043,8 +6130,8 @@ private fun FilterPill(text: String, selected: Boolean, modifier: Modifier = Mod
 
 @Composable
 private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
-    var activeFilter by remember { mutableStateOf("附近") }
-    var distanceFilter by remember { mutableStateOf("距离最近") }
+    var activeFilter by remember { mutableStateOf("推荐") }
+    var distanceFilter by remember { mutableStateOf("智能推荐") }
     var ratingFilter by remember { mutableStateOf<String?>(null) }
     var priceFilter by remember { mutableStateOf<String?>(null) }
     var showPriceRangeDialog by remember { mutableStateOf(false) }
@@ -6083,6 +6170,7 @@ private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
             } else {
                 list.sortedBy { parsePriceValue(it.priceBand) }
             }
+            "推荐" -> if (distanceFilter == "距离最近") list.sortedBy { parseDistanceMeters(it.distance) } else list
             else -> list.sortedBy { parseDistanceMeters(it.distance) }
         }
     }
@@ -6144,7 +6232,7 @@ private fun BookingScreen(stores: List<Store>, onStoreClick: (String) -> Unit) {
                 ratingFilter = ratingFilter,
                 priceFilter = priceFilter,
                 onDistanceFilterChange = {
-                    activeFilter = "附近"
+                    activeFilter = "推荐"
                     distanceFilter = it
                 },
                 onRatingFilterChange = {
@@ -6207,10 +6295,10 @@ private fun BookingFilterBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         BookingFilterMenu(
-            text = "附近",
-            selected = activeFilter == "附近",
+            text = "推荐",
+            selected = activeFilter == "推荐",
             selectedOption = distanceFilter,
-            options = listOf("距离最近", "3km内", "10km内"),
+            options = listOf("智能推荐", "距离最近", "3km内", "10km内"),
             onOptionClick = onDistanceFilterChange
         )
         BookingFilterMenu(
@@ -8535,8 +8623,9 @@ private fun BookingFormScreen(
         mutableStateOf(initialStoreId.takeIf { id -> storeOptions.any { it.id == id } } ?: storeOptions.firstOrNull()?.id.orEmpty())
     }
     var selectedStyleId by remember(initialStyle.id, styleOptions) { mutableStateOf(initialStyle.id) }
-    val selectedStore = storeOptions.firstOrNull { it.id == selectedStoreId }
     val selectedStyle = styleOptions.firstOrNull { it.id == selectedStyleId } ?: initialStyle
+    val rankedStoreOptions = remember(storeOptions) { rankBookingStores(storeOptions) }
+    val selectedStore = rankedStoreOptions.firstOrNull { it.id == selectedStoreId }
     val slotOptions = remember(selectedStoreId, selectedStore?.slots) {
         (selectedStore?.slots ?: emptyList())
             .filter { it.isNotBlank() }
@@ -8573,11 +8662,11 @@ private fun BookingFormScreen(
             item {
                 Text("选择门店", fontWeight = FontWeight.Bold, fontSize = 17.sp)
                 Spacer(Modifier.height(10.dp))
-                if (storeOptions.isEmpty()) {
+                if (rankedStoreOptions.isEmpty()) {
                     EmptyState("暂无可预约门店", "请稍后下拉刷新门店数据。")
                 } else {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(storeOptions, key = { it.id }) { store ->
+                        items(rankedStoreOptions, key = { it.id }) { store ->
                             BookingStoreOptionCard(
                                 store = store,
                                 selected = store.id == selectedStoreId,
@@ -8646,7 +8735,7 @@ private fun BookingFormScreen(
 @Composable
 private fun BookingStoreOptionCard(store: Store, selected: Boolean, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.width(252.dp).height(116.dp).clickable(onClick = onClick),
+        modifier = Modifier.width(272.dp).height(138.dp).clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = if (selected) RoseTint else MaterialTheme.colorScheme.surface),
         border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) RoseAccent else MaterialTheme.colorScheme.outline.copy(alpha = 0.28f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
@@ -8658,7 +8747,22 @@ private fun BookingStoreOptionCard(store: Store, selected: Boolean, onClick: () 
                     Text(store.name, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     if (selected) Icon(Icons.Rounded.Star, contentDescription = null, tint = RoseAccent, modifier = Modifier.size(17.dp))
                 }
-                Text("${store.distance}  ·  ${store.score} 分", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f), fontSize = 12.sp)
+                Text(
+                    if (store.recommendation.isNewStore && store.reviewCount == 0) "${store.distance}  ·  暂无评价" else "${store.distance}  ·  ${store.score} 分",
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.62f),
+                    fontSize = 12.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    StoreMetaPill(text = if (store.recommendation.newStoreProtection) "新店保护" else "智能推荐", highlight = true)
+                    if (store.recommendation.isNewStore && !store.recommendation.newStoreProtection) StoreMetaPill(text = "新店")
+                }
+                Text(
+                    store.recommendation.reason.ifBlank { "综合表现与你的需求匹配" },
+                    color = if (store.recommendation.newStoreProtection) RoseAccent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -9410,28 +9514,30 @@ private fun StoreCard(store: Store, onClick: () -> Unit) {
                         overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Start
                     )
-                    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(2.dp)
-                        ) {
-                            Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
-                            Text(store.score, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    if (!(store.recommendation.isNewStore && store.reviewCount == 0)) {
+                        Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
+                                Text(store.score, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    StoreMetaPill(text = store.statusText, highlight = true)
+                    StoreMetaPill(text = if (store.recommendation.isNewStore) "新店" else store.statusText, highlight = true)
                     StoreMetaPill(text = store.distance)
                     StoreMetaPill(text = averagePriceText(store))
                 }
 
                 Text(
-                    store.address.ifBlank { store.area },
+                    store.recommendation.reason.ifBlank { store.address.ifBlank { store.area } },
                     modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
+                    color = if (store.recommendation.newStoreProtection) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.58f),
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
                     textAlign = TextAlign.Start,

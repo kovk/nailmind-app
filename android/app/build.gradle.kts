@@ -36,8 +36,8 @@ android {
         applicationId = "com.nailmind.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = intProperty("NAILMIND_VERSION_CODE", 2)
-        versionName = stringProperty("NAILMIND_VERSION_NAME", "1.0.1")
+        versionCode = intProperty("NAILMIND_VERSION_CODE", 3)
+        versionName = stringProperty("NAILMIND_VERSION_NAME", "1.0.2")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -47,6 +47,7 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"${stringProperty("NAILMIND_API_BASE_URL", "http://10.0.2.2:8080/")}\"")
         buildConfigField("String", "API_MEDIA_BASE_URL", "\"${stringProperty("NAILMIND_API_MEDIA_BASE_URL", stringProperty("NAILMIND_API_BASE_URL", "http://10.0.2.2:8080/"))}\"")
         buildConfigField("long", "API_TIMEOUT_SECONDS", stringProperty("NAILMIND_API_TIMEOUT_SECONDS", "20"))
+        buildConfigField("boolean", "BOOKING_DEMO_STORES_ENABLED", stringProperty("NAILMIND_BOOKING_DEMO_STORES_ENABLED", "false"))
     }
 
     signingConfigs {

@@ -375,7 +375,17 @@ data class StoreDto(
     val slots: List<String>,
     val openHours: String,
     val artists: Int,
-    val works: String
+    val works: String,
+    val recommendation: StoreRecommendationDto? = null
+)
+
+data class StoreRecommendationDto(
+    val rank: Int = 0,
+    val score: Double = 0.0,
+    val isNewStore: Boolean = false,
+    val newStoreProtection: Boolean = false,
+    val reason: String = "",
+    val algorithm: String = ""
 )
 
 data class RestorationDimensionsDto(

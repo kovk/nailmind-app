@@ -233,7 +233,7 @@ class NailMindRepository(
         return response.body()?.bytes() ?: error("试戴结果为空")
     }
 
-    suspend fun stores(): StoresResponse = service.stores()
+    suspend fun stores(styleId: String? = null): StoresResponse = service.stores(styleId)
 
     suspend fun storeDetail(storeId: String): StoreDto = service.storeDetail(storeId)
 

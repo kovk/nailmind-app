@@ -106,7 +106,7 @@ interface NailMindApiService {
     suspend fun rerenderTryOn(@Path("jobId") jobId: String, @Body request: RerenderTryOnJobRequest): TryOnJobDto
 
     @GET("api/stores")
-    suspend fun stores(): StoresResponse
+    suspend fun stores(@Query("styleId") styleId: String? = null): StoresResponse
 
     @GET("api/stores/{storeId}")
     suspend fun storeDetail(@Path("storeId") storeId: String): StoreDto

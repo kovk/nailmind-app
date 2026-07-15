@@ -26,6 +26,7 @@ cp local.properties.example local.properties
 
 ```text
 NAILMIND_API_BASE_URL=http://10.0.2.2:8080/
+NAILMIND_BOOKING_DEMO_STORES_ENABLED=false
 NAILMIND_API_MEDIA_BASE_URL=http://10.0.2.2:8080/
 NAILMIND_API_TIMEOUT_SECONDS=20
 ```
@@ -34,6 +35,7 @@ NAILMIND_API_TIMEOUT_SECONDS=20
 
 - Android 模拟器访问本机后端时，应使用 `10.0.2.2`
 - 真机调试时，把 `NAILMIND_API_BASE_URL` 改成你电脑或测试服务器的实际 IP
+- 只有演示安装包需要把 `NAILMIND_BOOKING_DEMO_STORES_ENABLED` 设为 `true`；正式包保持 `false`
 - 这些值会编译进 `BuildConfig`
 
 ## 结构说明
